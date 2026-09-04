@@ -1206,3 +1206,90 @@ V1 excludes production/CNC, installation, after-sales and direct Agent control o
 16. same application services execute
 
 This proves the platform before WholeHouse scale-up.
+
+---
+
+## 60. Legacy monolith shrink target
+
+The migration is not complete merely because new modular Workbench code exists beside the old monoliths.
+
+The following Legacy surfaces have a one-way responsibility rule:
+
+```text
+main.py
+static/js/canvas.js
+static/js/smart-canvas.js
+```
+
+Their responsibility set must trend downward over time.
+
+### Backend target
+
+`main.py` converges toward a composition/bootstrap role:
+
+```text
+create_app()
+  -> construct FastAPI application
+
+register_routes()
+  -> attach modular API routers
+
+wire_services()
+  -> construct repositories, registries, runtimes and application services
+
+startup / shutdown
+  -> process lifecycle
+
+compatibility bootstrap
+  -> narrowly scoped Legacy adapters during migration
+```
+
+Target business implementation lives behind modular boundaries such as:
+
+```text
+workbench/api/
+workbench/application/
+workbench/domain/
+workbench/repositories/
+workbench/runtimes/
+packages/
+```
+
+A new Workbench domain/runtime should not be implemented in `main.py` first and extracted later.
+
+### Frontend target
+
+Legacy page scripts progressively become page adapters:
+
+```text
+canvas.js
+smart-canvas.js
+    ↓
+delegate user intents / compatibility events
+    ↓
+static/js/workbench/...
+    ↓
+shared Canvas application/domain/renderer modules
+```
+
+Target rules:
+
+- shared interaction behavior moves to shared Canvas modules;
+- new registries/services are consumed through modular APIs;
+- Skill/Model/Execution/Package-specific behavior is not added as new large branches in Legacy page scripts;
+- Legacy source-mode distinctions shrink until R4 cutover removes duplicate product runtime.
+
+### Architecture metric
+
+File size is not itself the Gate.
+
+The architectural metric is **responsibility delta**:
+
+```text
+new Workbench responsibility added to Legacy monolith = regression
+responsibility delegated/extracted from Legacy monolith = progress
+compatibility-only wiring with bounded removal Gate = allowed
+```
+
+R0 should establish a practical baseline for these three files.
+Later Rounds should report responsibility movement, not merely line counts.

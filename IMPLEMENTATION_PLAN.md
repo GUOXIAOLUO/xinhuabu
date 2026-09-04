@@ -71,6 +71,7 @@ Verify:
 - Codex Exec/App Server status
 - security boundary
 - benchmark/performance follow-up
+- Legacy monolith responsibility baseline for main.py / canvas.js / smart-canvas.js
 
 ### CURRENT_ARCHITECTURE requirement
 
@@ -157,6 +158,7 @@ one normal product Canvas entry; old deep links remain during migration.
 - U7 is not executed in R2.
 - no SQLite authority switch.
 - no final ExecutorRegistry/ExecutionProfile runtime.
+- no new Workbench business responsibility added to canvas.js or smart-canvas.js.
 
 Gate:
 
@@ -570,6 +572,50 @@ Exit:
 
 ---
 
+## Cross-Round Legacy Monolith Rule
+
+For every implementation Round:
+
+> `main.py`, `static/js/canvas.js`, and `static/js/smart-canvas.js` may lose responsibility but must not gain new Workbench business responsibility.
+
+New Workbench capability implementation goes directly to:
+
+- `workbench/api/`
+- `workbench/application/`
+- `workbench/domain/`
+- `workbench/repositories/`
+- `workbench/runtimes/`
+- `packages/...`
+- shared modular frontend boundaries such as `static/js/workbench/...`
+
+Changes to Legacy monoliths should be limited to:
+
+- composition/wiring;
+- compatibility adapters;
+- delegation into new modules;
+- removal/extraction of old responsibility;
+- narrowly scoped fixes to existing Legacy behavior.
+
+Each Round must state:
+
+```text
+Legacy responsibility delta
+
+main.py:
+  added Workbench responsibility: yes/no
+  responsibilities removed/delegated: ...
+
+static/js/canvas.js:
+  added Workbench responsibility: yes/no
+  responsibilities removed/delegated: ...
+
+static/js/smart-canvas.js:
+  added Workbench responsibility: yes/no
+  responsibilities removed/delegated: ...
+```
+
+Any `yes` requires an approved compatibility exception with an explicit removal Gate; otherwise the Round fails architecture review.
+
 ## Cross-Round report format
 
 Every Round reports:
@@ -589,3 +635,4 @@ Every Round reports:
 13. Known issues
 14. Exact next authorized Round
 15. Forbidden next actions
+16. Legacy responsibility delta

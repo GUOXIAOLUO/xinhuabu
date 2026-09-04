@@ -296,6 +296,80 @@ Not included:
 
 ---
 
+## 21. Legacy monolith responsibility migration
+
+The strangler strategy is one-way.
+
+Legacy monoliths:
+
+- `main.py`
+- `static/js/canvas.js`
+- `static/js/smart-canvas.js`
+
+may retain compatibility behavior temporarily, but they do not receive new Workbench business systems.
+
+### New capability placement
+
+Implement new capability contracts directly in modular target boundaries.
+
+Examples:
+
+```text
+SkillRegistry
+-> workbench/domain|application|runtimes/skills
+
+Provider / Model
+-> workbench/domain|application|runtimes/models|providers
+
+Execution
+-> workbench/domain|application|runtimes/executors
+
+Artifact / Entity / Knowledge / Workflow
+-> corresponding workbench domain/application/repository boundaries
+
+WholeHouse
+-> packages/wholehouse/
+```
+
+`main.py` may wire/register those modules.
+
+Legacy Canvas scripts may delegate to `static/js/workbench/...`.
+
+They must not contain a second implementation of the same new capability.
+
+### Extraction sequence
+
+For an existing Legacy responsibility:
+
+```text
+characterize existing behavior
+-> introduce modular seam
+-> delegate Legacy caller
+-> verify parity
+-> remove old implementation responsibility
+-> remove compatibility path at its approved Gate
+```
+
+Avoid:
+
+```text
+implement new feature in Legacy monolith
+-> duplicate it in workbench/
+-> maintain both
+-> migrate someday
+```
+
+### Compatibility exception
+
+If an unavoidable Legacy compatibility patch temporarily adds code to a monolith:
+
+- it must not create a new domain authority;
+- it must delegate as soon as the stable seam exists;
+- the active Round records the exception;
+- the status/plan records the removal Gate.
+
+The success metric is responsibility reduction, not cosmetic file splitting.
+
 ## Rollback principles
 
 Bounded rollback examples:

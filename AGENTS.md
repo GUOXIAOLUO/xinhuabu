@@ -616,6 +616,88 @@ Use strangler/adapters, not a big-bang rewrite.
 
 ---
 
+## 31A. Legacy monolith responsibility freeze
+
+The following files are Legacy compatibility surfaces:
+
+- `main.py`
+- `static/js/canvas.js`
+- `static/js/smart-canvas.js`
+
+From this point forward:
+
+> **Legacy monoliths may lose responsibility, but they must not gain new Workbench business responsibility.**
+
+They may:
+
+- retain existing Legacy behavior during a verified migration window;
+- call new application/domain/runtime services;
+- host narrowly scoped compatibility adapters;
+- perform bootstrap/composition/wiring;
+- delegate page-level events into shared Workbench modules;
+- shrink as responsibilities move behind stable boundaries.
+
+They must not become the primary implementation location for any new Workbench capability.
+
+New capabilities must be implemented in the appropriate modular boundary first, including:
+
+- SkillRegistry / DefinitionResolver;
+- ProviderRegistry / ProviderConnection / ModelRegistry / ModelAvailability;
+- ExecutionProfile / ExecutorRegistry / ExecutionRuntime;
+- Asset / Artifact / Entity / Knowledge runtime;
+- Workflow / Approval / Handoff runtime;
+- PackageRuntime / WorkspaceProfile;
+- CodexBridge / Agent orchestration;
+- WholeHouse or other Package behavior.
+
+Do not implement a new capability in a Legacy monolith with the intention of "moving it later".
+
+### Backend target
+
+`main.py` should progressively converge toward:
+
+```text
+create_app()
+register_routes()
+wire_services()
+startup / shutdown
+narrow compatibility bootstrap
+```
+
+New backend business logic should live under appropriate `workbench/` or `packages/` modules.
+
+`main.py` may import and register new routes/services, but it should not contain the primary implementation of those capabilities.
+
+### Frontend target
+
+New shared Workbench/Canvas behavior should live under modular shared boundaries such as:
+
+`static/js/workbench/...`
+
+or a later approved replacement frontend boundary.
+
+Do not add new Workbench business branches to:
+
+- `static/js/canvas.js`
+- `static/js/smart-canvas.js`
+
+Those files may delegate to shared modules while their responsibility shrinks.
+
+### Round audit requirement
+
+Every implementation Round must report a **Legacy responsibility delta**:
+
+- Did `main.py` gain any new Workbench business responsibility?
+- Did `static/js/canvas.js` gain any new Workbench business responsibility?
+- Did `static/js/smart-canvas.js` gain any new Workbench business responsibility?
+- Which responsibilities moved out of Legacy monoliths?
+
+Expected result for the first three questions is **No**, unless an approved proposal explicitly documents a temporary compatibility exception and removal Gate.
+
+A net increase in Legacy monolith responsibility is a Gate failure by default.
+
+---
+
 # Development rules
 
 ## 32. Gate method
@@ -704,5 +786,6 @@ Applicable items must pass:
 - no secret leak
 - no accidental generated artifacts
 - current Gate acceptance criteria verified
+- Legacy responsibility delta reviewed and no unapproved monolith growth occurred
 
 Do not mark a Gate complete merely because code exists.
