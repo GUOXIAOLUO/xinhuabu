@@ -1,284 +1,708 @@
 # AI Workbench Repository Rules
 
-## Purpose and scope
+## Purpose
 
-This file governs the entire repository. The repository is an incremental second-stage development of `GUOXIAOLUO/canvas`; it is not a greenfield rewrite.
+This repository incrementally evolves `GUOXIAOLUO/canvas` into a generic AI Workbench.
+It is not a greenfield rewrite.
 
-The product direction is a Web UI first, infinite-canvas AI Workbench with a generic Core and installable Industry Packs. The first supported Industry Pack is WholeHouse, but Core must remain useful when that pack is absent.
+Target:
 
-Before changing architecture or behavior, read these files in order:
+**AI Workbench Core + Codex Harness + dynamic Workbench Skills + user-selectable Models + explicit Provider Connections + pluggable Executors + versioned project data + installable Packages.**
+
+WholeHouse is the first deep Industry Package, not the Core.
+
+V1 is Web UI first.
+
+---
+
+## Authoritative reading order
+
+Before architecture or behavior changes, read:
 
 1. `AGENTS.md`
-2. `CURRENT_ARCHITECTURE.md`
-3. `TARGET_ARCHITECTURE.md`
-4. `MIGRATION_PLAN.md`
-5. `IMPLEMENTATION_PLAN.md`
-6. The affected source files and tests
+2. `docs/status/CURRENT_EXECUTION_STATUS.md`
+3. `CURRENT_ARCHITECTURE.md`
+4. `TARGET_ARCHITECTURE.md`
+5. `MIGRATION_PLAN.md`
+6. `IMPLEMENTATION_PLAN.md`
+7. affected source files and tests
 
-When documentation conflicts with executable code, treat the executable code as the current-state fact, then update the documentation in the same change. Product hard constraints in this file remain mandatory unless the user explicitly approves a replacement architecture proposal.
+Authority:
 
-## Product boundary
+- executable source + verified tests = current-state facts;
+- `AGENTS.md` = hard constraints;
+- `TARGET_ARCHITECTURE.md` = target contracts;
+- `CURRENT_ARCHITECTURE.md` = current implementation facts;
+- `IMPLEMENTATION_PLAN.md` = Round/Gate order;
+- `CURRENT_EXECUTION_STATUS.md` = currently authorized Round.
 
-`AI Workbench Core` owns generic project, graph, execution, asset, knowledge, model, version, permission, and tool abstractions.
+If `CURRENT_ARCHITECTURE.md` contradicts live source/tests, update it in the same Round that verifies the contradiction.
 
-`WholeHouse Pack` owns whole-house-specific skills, entity definitions, workflow templates, knowledge, UI metadata, and validation rules.
+Do not infer the active Round from historical prose.
 
-The V1 client is a browser application. Do not introduce Electron, Tauri, native macOS, iOS, or Android clients without an approved proposal. The local FastAPI process may serve browser clients on localhost or a trusted LAN.
+---
 
-## Hard architecture constraints
+# Hard architecture constraints
 
-### Core is industry-neutral
+## 1. Core remains industry-neutral
 
-Do not place whole-house concepts such as cabinet, wardrobe, material, hardware, room, or wholehouse business rules in Core modules. Industry identifiers may appear in generic test fixtures and pack-loading integration tests, but Core behavior must not branch on them.
+Core may own generic:
 
-Put WholeHouse implementation under `packages/wholehouse/`. A disabled or absent WholeHouse Pack must not prevent Core from starting or serving generic projects and canvases.
+- Project / Canvas / authorization / audit
+- Node / Edge / Group
+- Asset / Artifact / Collection
+- Entity / Relation
+- Knowledge
+- Workbench Skill / Definition resolution
+- Provider / Model / ModelAvailability
+- Execution
+- Workflow / Approval / Handoff
+- MCP / Tool runtime
+- CodexBridge
+- Package / WorkspaceProfile runtime
 
-### Canvas is business-neutral
+WholeHouse business implementation belongs under:
 
-Canvas Core may understand nodes, edges, groups, ports, position, size, selection, viewport, zoom, graph interaction, and generic execution state. It must not decide what a floorplan, cabinet, contract, or design-review node means.
+`packages/wholehouse/`
 
-Do not add one Canvas node class or render branch per Skill. The migration target is:
+Core must start and support useful general work without WholeHouse.
 
-`NodeRecord + NodeShell + RendererRegistry + SkillDefinition`
+---
 
-The finite renderer set may grow through a reviewed registration contract. The number of Skills must not cause a matching increase in Canvas Core branches.
+## 2. Keep canonical concepts separate
 
-### Node creation has one service boundary
+```text
+Node
+≠ Workbench Skill
+≠ Model
+≠ ProviderDefinition
+≠ ProviderConnection
+≠ ModelAvailability
+≠ ExecutionProfile / Executor
+≠ Artifact
+```
 
-All new node-entry paths must call `NodeCreationService`, including context menu, command palette, Skill Library drag, file drop, workflow import, and Agent proposals.
+Definitions:
 
-Do not add another direct `nodes.push(<node>)` path for migrated node kinds. Existing direct creation functions are Legacy and remain supported until their callers have migrated.
+- Workbench Skill = reusable work/method contract.
+- Model = model identity and capabilities.
+- ProviderDefinition = provider/protocol adapter type.
+- ProviderConnection = one configured user/workspace connection/account/endpoint.
+- ModelAvailability = one executable route from a Model through a ProviderConnection and compatible Executor.
+- ExecutionProfile = user-facing execution mode supported by a Skill.
+- Executor = runtime mechanism that performs a run.
+- Artifact = versioned produced result.
+- Node = one visual work instance.
 
-### Skills are dynamic and model-independent
+Do not make provider/model/executor identity a permanent Node type.
 
-A Workbench Skill is discovered from a versioned manifest and execution instructions. Adding a conforming Skill must not require editing the main Canvas node menu or render dispatch.
+---
 
-A Skill declares capability requirements; it does not select a provider or model. The model-selection precedence is fixed:
+## 3. Codex has two separate roles
 
-1. current Node user selection;
-2. user default for the Skill;
-3. user system default.
+### Harness role
 
-The system may filter incompatible models and recommend a model, but it must not silently switch the user's selection.
+Codex Harness / App Server is the primary Agent/orchestration runtime target.
 
-### Project data is authoritative
+Workbench product code depends on a stable `CodexBridge`, not raw App Server/subprocess/protocol details.
 
-Project records, canvas graph state, formal requirements, dimensions, assets, workflow versions, approvals, and final artifacts belong to project persistence. Codex or chat threads may retain reasoning and conversation, but they are not the source of truth for project deliverables.
+### Model role
 
-### Knowledge and Asset are separate domains
+Models discovered through Codex/OpenAI are ordinary ModelRegistry/ModelAvailability choices.
 
-Knowledge represents facts, documents interpreted as knowledge, structured records, and retrieval indexes. Asset represents owned files and their metadata. Do not merge them into one vector-store abstraction.
+The Agent's own model does not force child Node models.
 
-### Workflow and provenance are versioned
+Do not create a permanent "Codex model Node".
 
-Workflow is a dynamic graph that can be created, edited, saved, duplicated, versioned, run, paused, resumed, retried, imported, and exported.
+---
 
-Every formal output must be traceable to its Node version, Skill ID and version, provider, model ID, parameters, inputs and input versions, Asset versions, Knowledge snapshot, Workflow version, parent version, user, and timestamp.
+## 4. Workbench Skill is not Codex Skill
 
-Dependency changes create an `outdated` result; they do not delete the prior result. Frozen results require explicit human approval.
+A Workbench Skill is the product-level capability definition.
 
-### Agents use APIs, not DOM control
+A Codex `SKILL.md` is one possible implementation used by one `codex_harness` ExecutionProfile.
 
-Codex is the orchestration runtime, not the only model provider. Agent code must call stable Workbench, Canvas, Project, Skill, Workflow, Asset, Knowledge, Model, or MCP APIs. It must not use selectors, synthetic clicks, or element dragging to change project state.
+The same Workbench Skill may support Codex Harness, direct model API, script, ComfyUI, or another compatible executor without changing Skill identity.
 
-Agent-created graph changes are proposals by default. Bulk changes require user confirmation unless a user has explicitly enabled an auto-modify policy.
+---
 
-### Secrets remain backend-only
+## 5. One business-neutral Unified Canvas
 
-Provider secrets must never be returned to browser code, embedded in Canvas records, logged, committed, or stored in browser storage. Browser clients may receive `has_secret` metadata and a non-sensitive provider identifier; do not return the secret or a reversible representation.
+Target:
 
-All provider calls flow through the backend. New endpoints require authentication and authorization design, project-scope checks where applicable, bounded input validation, and audit events for sensitive actions.
+`CanvasRecord + NodeRecord + EdgeRecord + NodeShell + RendererRegistry + DefinitionResolver`
 
-## Current-system compatibility rules
+Canvas understands graph/interaction/state, not WholeHouse meaning.
 
-The existing application is a FastAPI and static HTML/CSS/JavaScript monolith. `main.py`, `static/js/canvas.js`, and `static/js/smart-canvas.js` are high-risk compatibility surfaces.
+Do not add a third Canvas.
 
-Until migration gates pass:
+Classic/Smart are migration sources, not permanent product modes.
 
-- Keep Classic Canvas and Smart Canvas loadable.
-- Keep current Canvas JSON readable.
-- Keep current provider, ComfyUI, RunningHub, MiniMax, LLM, Prompt, Image, Output, Loop, Group, and workflow paths operational.
-- Mark migrated fixed node kinds as Legacy through adapters; do not delete them.
-- Preserve unknown fields when adapting or re-saving Legacy nodes.
-- Do not mass-move functions merely to create a cleaner directory tree.
-- Do not change the frontend framework without an approved proposal.
-- Do not replace JSON persistence or SQLite/PostgreSQL strategy without an approved proposal.
+Legacy capability may remain through adapters after duplicate Canvas runtime removal.
 
-The first compatibility boundary is a pure adapter: Legacy Canvas JSON in, validated `NodeRecord` view out, with a lossless path back to the existing storage shape during the transition.
+---
 
-## Intended dependency direction
+## 6. Finite renderer vocabulary
 
-New backend code must follow this direction:
+Default renderer families:
 
-`API routes -> application services -> domain -> repository/runtime interfaces`
+- media
+- document
+- analysis
+- task
+- entity
+- form
+- table
+- comparison
+- approval
+- composite
+- legacy
 
-Adapters and infrastructure implement interfaces; domain code must not import FastAPI, filesystem paths, provider SDKs, ComfyUI protocol details, or Industry Packs.
+New Skills normally reuse an existing renderer.
 
-New frontend code must follow this direction:
+Adding a new renderer family requires architecture justification/proposal if the existing vocabulary can plausibly serve the requirement.
 
-`page adapters -> Canvas application services -> domain records/registries -> renderer implementations`
+---
 
-Renderer implementations receive safe view models and emit user intents. They do not write storage or call provider endpoints directly.
+## 7. One definition resolution boundary
 
-Cross-domain references use stable IDs and version IDs. Do not pass mutable filesystem paths as formal domain identity.
+All Node creation resolves `definition_ref` through one generic `DefinitionResolver` or equivalent composite boundary.
 
-## State and schema rules
+It may delegate to:
 
-Use one centralized Node state vocabulary:
+- SkillRegistry
+- LegacyDefinitionRegistry
+- Entity definition registry
+- Workflow/composite definition registry
+- Package historical DefinitionSnapshots
 
-- `draft`
-- `ready`
-- `missing_input`
-- `queued`
-- `running`
-- `waiting_user`
-- `waiting_approval`
-- `completed`
-- `failed`
-- `outdated`
-- `frozen`
+`NodeCreationService` must not branch on package/business/provider IDs.
 
-All persisted schemas require a `schema_version`. Public manifests require JSON Schema validation and explicit compatibility rules. IDs are opaque strings; do not infer business meaning by parsing an ID.
+---
 
-`SkillDefinition` and `SkillInstance` are different records. Multiple nodes may reference the same definition version.
+## 8. One creation/mutation boundary
 
-Model capabilities, input types, and output types are registry metadata. Provider-specific parameters belong in provider adapters or a namespaced extension object, not in generic Canvas logic.
+Migrated creation uses:
 
-## Security baseline
+- `NodeCreationService`
+- `GraphMutationService` for atomic graph changes
 
-Treat the current localhost/LAN deployment as untrusted by default because the server binds to `0.0.0.0`.
+Migrated edits use `NodeMutationService` or equivalent validated application boundary.
 
-For every changed endpoint, check:
+Creation/mutation must support applicable:
 
-- authentication and project authorization;
-- CORS behavior;
-- path traversal and symlink escape;
-- upload size, type, and content validation;
-- remote URL allowlisting and SSRF protections;
-- secret redaction in response bodies, exceptions, and logs;
-- command execution and subprocess argument boundaries;
-- destructive-action confirmation and audit records;
-- concurrency and stale-write behavior.
+- authorization
+- expected revision
+- validation
+- idempotency
+- audit
+- stale-write rejection
+- outdated propagation
 
-Do not weaken the existing path-containment checks. Do not add new browser-side token fallbacks. Remove Legacy browser token paths only through a compatibility migration with tests.
+Do not add direct raw node/project JSON or DOM-based domain mutation paths.
 
-## Development method
+---
 
-Use gate-based, incremental development.
+## 9. One compatibility resolver
+
+Human and Agent flows use the same compatibility logic.
+
+Compatibility may consider:
+
+- Port/Data type
+- cardinality
+- Skill/Package enabled state
+- permissions
+- model capability/availability
+- executor availability
+- project state/policy
+
+This powers port highlighting, port drop to blank Canvas, "Use it next", dynamic toolbar, Command-K suggestions and Agent Skill selection.
+
+Do not hard-code provider-specific or WholeHouse-specific next-step menus into Canvas Core.
+
+---
+
+## 10. Port/Data contracts are explicit
+
+Do not keep `input_bindings` as an indefinitely untyped bag.
+
+Target binding categories include:
+
+- AssetVersion
+- ArtifactVersion
+- EntityRef / EntityVersion
+- Collection
+- literal/config input
+
+KnowledgeSnapshot normally belongs to execution context unless a Skill explicitly declares a Knowledge input contract.
+
+Use `PortTypeRegistry`, not an Artifact-only registry, because ports can carry Asset, Artifact, Entity and Collection references.
+
+---
+
+## 11. Group != Collection != ExecutionPolicy
+
+- Group = Canvas visual organization.
+- Collection = typed multi-item data semantics.
+- ExecutionPolicy = batch/loop/retry/parallel semantics.
+
+Legacy Loop remains compatible, but new batch behavior converges on ExecutionPolicy.
+
+---
+
+## 12. No silent runtime substitution
+
+Model selection precedence:
+
+1. current Node user choice
+2. user's Skill default
+3. Workspace/System user default
+
+The system may filter and recommend.
+
+It must not silently replace:
+
+- Model
+- ProviderConnection / ModelAvailability
+- ExecutionProfile / Executor
+
+Unavailable selected routes surface an explicit actionable state.
+
+Formal provenance records requested and actual selections.
+
+---
+
+## 13. NodeRecord v1 migration contracts
+
+Current NodeRecord v1 remains the migration basis until explicitly proposed otherwise.
+
+### Execution selection
+
+Until R8 proves the execution contract:
+
+```json
+{
+  "workbench.execution": {
+    "profile_id": "codex-deep",
+    "executor_type": "codex_harness",
+    "runtime_connection_id": null
+  }
+}
+```
+
+lives under `extensions`.
+
+### ModelAvailability selection
+
+Current NodeRecord v1 `ModelBinding` contains `provider_id + model_id`.
+
+During migration:
+
+- `model_id` continues to identify the selected Model.
+- `provider_id` remains the Legacy/provider-connection compatibility identifier required by v1.
+- canonical ModelAvailability identity is stored in a namespaced extension when needed.
+
+Example:
+
+```json
+{
+  "workbench.model_availability": {
+    "availability_id": "availability_01"
+  }
+}
+```
+
+Do not silently reinterpret stored `provider_id` as a new incompatible concept.
+
+Promoting stable model/execution bindings into NodeRecord v2 requires a proposal.
+
+---
+
+## 14. State authorities are separated
+
+Target separation:
+
+- `NodeState` = Canvas/task projection state.
+- `ExecutionRunState` = execution authority.
+- Artifact freshness = current/outdated.
+- Approval/Frozen = governance state on formal versions.
+
+A Node may project `outdated` or `frozen`, but formal Artifact/Approval records are authoritative.
+
+Frozen applies to a formal version, not to mutable Node UI state itself.
+
+---
+
+## 15. Node UX stays task-oriented
+
+NodeShell converges on:
+
+1. task/status
+2. inputs/collections
+3. primary content/result
+4. Skill / Model / Execution
+5. actions/output
+
+Advanced implementation details belong in Inspector.
+
+Intermediate ArtifactVersions may exist without visible Nodes and may be materialized on demand.
+
+---
+
+## 16. Project data is authoritative
+
+Project/domain persistence owns formal:
+
+- requirements/dimensions
+- Project/Canvas identity
+- structured Entities
+- Canvas graph
+- Assets/Artifacts
+- Knowledge snapshots
+- Workflow versions/runs
+- approvals/frozen versions
+- handoffs
+- audit
+
+Codex Threads own Agent session/conversation state, not formal project truth.
+
+---
+
+## 17. Canonical persistence is explicit
+
+V1 structured authority target is SQLite behind repositories.
+
+Risky persistence changes use:
+
+`expand -> backfill -> compare -> compatibility -> controlled switch -> verify -> contract`
+
+Do not leave new domain systems permanently authoritative in ad-hoc Legacy JSON.
+
+`CanvasRecord.revision` is a logical revision, not a timestamp alias.
+
+Changing the primary database strategy requires proposal approval.
+
+---
+
+## 18. Legacy Project identity migration is explicit
+
+Legacy Canvas fields such as `project: "default"` and empty/unowned `owner` must map through an explicit migration policy.
+
+Do not invent ownership silently during migration.
+
+R3 must define the local workspace actor/default project mapping before authority switch.
+
+---
+
+## 19. Authorization is action-based
+
+Current `can_edit(...)` behavior may remain as compatibility.
+
+Target authorization is action/resource based, for example:
+
+- project.read
+- canvas.edit
+- execution.run
+- artifact.write
+- entity.edit
+- knowledge.manage
+- approval.decide
+- handoff.export
+- provider.manage
+- package.manage
+
+Codex tools receive least-privilege project-scoped capabilities.
+
+---
+
+## 20. Asset, Artifact, Entity and Knowledge are distinct
+
+- Asset = owned file/blob/version.
+- Artifact = produced result/version.
+- Entity = structured formal project fact/relation.
+- Knowledge = interpreted/reference information + retrieval snapshot.
+
+Do not collapse them into one JSON/vector abstraction.
+
+Formal Entity updates produce immutable EntityVersions.
+
+---
+
+## 21. Workflow/provenance/approval are versioned
+
+Formal output provenance captures applicable:
+
+- Node/revision
+- Skill/version
+- Model
+- ProviderConnection / ModelAvailability
+- ExecutionProfile / Executor
+- RuntimeConnection
+- parameters
+- input/Asset versions
+- Entity versions
+- KnowledgeSnapshot
+- WorkflowVersion
+- parent version
+- actor/timestamp
+- usage
+
+Dependency changes mark prior formal outputs outdated; history remains.
+
+Formal frozen output requires authorized human approval.
+
+Agent/runtime may request approval but cannot approve/freeze its own output.
+
+---
+
+## 22. Agent mutation is proposal-first
+
+Agent graph changes use a domain record such as `GraphProposal`.
+
+Ghost nodes are UI projections, not formal NodeRecords.
+
+Proposal application must verify `base_revision`.
+
+If Canvas/project state changed, the proposal becomes stale and must be recomputed/rebased or re-confirmed; it is not auto-applied.
+
+---
+
+## 23. Audit and domain mutation should be atomic
+
+For canonical persistence, domain mutation and its durable audit/outbox record should commit atomically whenever they belong to the same transaction.
+
+Do not treat "persist succeeded, audit append failed" as a successful canonical mutation.
+
+---
+
+## 24. Package history is independently resolvable
+
+Package kinds:
+
+- system
+- common
+- industry
+
+WholeHouse is industry.
+
+Historical projects must not depend solely on currently installed package folders.
+
+Use a `ProjectPackageLock` and/or immutable `DefinitionSnapshot` sufficient to resolve historical `definition_ref` values.
+
+WorkspaceProfile is an experience layer only; it does not bypass authorization or remove compatible general capabilities.
+
+---
+
+## 25. MCP tool use is not automatically MCPExecutor
+
+Distinguish:
+
+- Codex/Agent invoking MCP tools inside an Agent loop
+- a Workbench Skill whose execution route is a direct MCP action
+
+These are separate semantics even if they share MCP infrastructure.
+
+---
+
+## 26. Executor endpoints are explicit
+
+Executor type is not enough for multi-instance runtimes.
+
+Examples:
+
+- ComfyUI Mac mini
+- GPU workstation
+- RunningHub account
+
+ExecutionProfile/executor configuration resolves through typed RuntimeConnections/ExecutorEndpoints rather than arbitrary UI strings.
+
+---
+
+## 27. Skill and ExecutionProfile requirements merge predictably
+
+Effective requirements are:
+
+`Skill base requirements + ExecutionProfile additional/narrowing requirements`
+
+A profile may add or narrow requirements.
+
+It must not silently relax mandatory Skill capabilities or permissions.
+
+---
+
+## 28. Capability vocabulary is versioned
+
+Use one Core capability vocabulary such as:
+
+`workbench.capability/1`
+
+Provider adapters normalize provider-specific names into this vocabulary.
+
+---
+
+## 29. Codex App Server integration rules
+
+When implementing App Server:
+
+- inspect installed/target Codex version
+- inspect official schema/protocol for that version
+- record/pin the tested version
+- prefer generated/validated bindings
+- treat transport as Codex JSON-RPC-lite framed as JSONL over stdio
+- isolate raw protocol behind `CodexBridge`
+- preserve `codex exec` compatibility until separately removed
+- normalize events/approvals into Workbench contracts
+- never persist raw protocol payloads as domain truth
+
+Changing the App Server integration contract requires a proposal.
+
+### R1 launch policy
+
+R1 proves transport/runtime integration, not unrestricted Agent authority.
+
+R1 must define:
+
+- bounded working directory
+- environment/secret filtering
+- shell/filesystem policy
+- destructive approval policy
+- timeout/cancellation
+- no Workbench project mutation tools
+
+---
+
+## 30. Secrets/security
+
+Secrets remain backend-only.
+
+Never expose/persist/log raw provider secrets in browser/Canvas/Node/fixtures.
+
+For changed surfaces check applicable:
+
+- authentication
+- project authorization/roles
+- CORS/CSRF
+- path/symlink containment
+- upload/archive safety
+- SSRF/network policy
+- secret redaction
+- subprocess/tool scope
+- timeout/cancel
+- destructive confirmation
+- audit
+- stale-write/concurrency behavior
+
+LAN mode is not authenticated multi-user support unless those controls exist.
+
+---
+
+## 31. Legacy compatibility
+
+Until replacement Gates pass preserve:
+
+- current Canvas JSON readability
+- required Classic/Smart compatibility paths
+- provider execution
+- ComfyUI
+- RunningHub
+- Prompt/LLM/Loop/Group/fixed-node behavior
+- unknown Legacy fields
+- current `codex exec`
+
+Do not delete a Legacy node family without proposal/evidence.
+
+Use strangler/adapters, not a big-bang rewrite.
+
+---
+
+# Development rules
+
+## 32. Gate method
 
 Before implementation:
 
-1. Inspect the affected current code paths and current worktree.
-2. State the compatibility contract.
-3. Identify new and modified files.
-4. Add or update tests that fail for the missing behavior.
-5. Prefer a small seam over a broad rewrite.
+1. inspect HEAD/worktree
+2. read current status
+3. inspect affected code/tests
+4. state compatibility contract
+5. state non-goals
+6. list expected files
+7. identify focused tests
+8. identify proposal-required changes
 
 During implementation:
 
-- Preserve unrelated user changes.
-- Keep diffs focused.
-- Add types at new boundaries.
-- Use structured errors and useful logs without secrets.
-- Avoid duplicate code paths for the same domain action.
-- Maintain read compatibility before changing write behavior.
-- Put feature flags or compatibility switches at service boundaries, not scattered UI branches.
+- smallest seam first
+- preserve unrelated changes
+- no broad high-risk reformat
+- no duplicate domain path
+- typed/versioned public boundaries
+- structured errors
+- secret-safe logging
+- feature flags at service/runtime boundaries
 
 After implementation:
 
-1. Run focused tests.
-2. Run the repository baseline checks.
-3. Exercise the relevant browser flow manually.
-4. Verify Legacy Canvas loading and saving when Canvas persistence changes.
-5. Update architecture and migration documents if a contract changed.
+1. focused tests
+2. baseline tests
+3. syntax/static checks
+4. browser acceptance where applicable
+5. Legacy load/save verification where applicable
+6. update `CURRENT_EXECUTION_STATUS.md`
+7. update `CURRENT_ARCHITECTURE.md` when verified facts changed
+8. update plan facts only when verified
+9. record exact next authorized Round + forbidden next actions
 
-## Baseline commands
+Do not execute multiple architecture Rounds in one task.
 
-The repository currently has no pinned development environment. Install runtime requirements into an isolated environment before running Python tests:
+---
 
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
-```
+## 33. Proposal-required decisions
 
-Run syntax checks for the high-risk entry points:
+Write a proposal before:
 
-```bash
-.venv/bin/python -c "import ast,pathlib; ast.parse(pathlib.Path('main.py').read_text(encoding='utf-8')); print('main.py AST OK')"
-node --check static/js/canvas.js
-node --check static/js/smart-canvas.js
-```
+- frontend framework replacement
+- primary database strategy replacement
+- incompatible NodeRecord change
+- Codex App Server contract change
+- Legacy node family deletion
+- early Canvas compatibility removal
+- large infrastructure dependency
+- Agent auto-mutation by default
+- Industry behavior in Core
+- unjustified new renderer family
 
-When a new package or tool is introduced, document one reproducible install command and pin or constrain versions before making it part of the required baseline.
+Proposal includes:
 
-## Definition of Done
+- Problem
+- Constraints
+- Options
+- Recommendation
+- Migration Cost
+- Compatibility Impact
+- Security Impact
+- Rollback
+- Acceptance Criteria
 
-A change is complete only when all applicable items are true:
+---
 
-- The requested behavior is implemented without placeholders.
-- The change obeys Core/Industry Pack and Canvas/business separation.
-- Persisted or public schemas are versioned and validated.
-- Backward compatibility is tested or the approved breaking change is documented.
-- Security-sensitive routes have authentication, authorization, validation, and audit treatment appropriate to their risk.
-- Focused automated tests pass.
-- Relevant syntax/static checks pass.
-- Manual verification steps are recorded and reproducible.
-- Architecture and migration documents match the code.
-- No provider secret appears in browser storage, responses, logs, fixtures, or commits.
-- The worktree contains no accidental generated artifacts.
+## 34. Definition of Done
 
-## Architecture gates
+Applicable items must pass:
 
-### Gate 1: dynamic Skill
+- requested behavior complete
+- Core/Package separation holds
+- Skill/Model/ProviderConnection/Executor/Artifact separation holds
+- persistence authority explicit
+- schemas/contracts versioned where required
+- compatibility tested or approved break documented
+- security checks complete
+- focused/baseline/static tests pass
+- browser acceptance recorded where applicable
+- docs/status match verified code
+- no secret leak
+- no accidental generated artifacts
+- current Gate acceptance criteria verified
 
-A new conforming Skill folder is discovered, appears in Skill Library, creates a Skill node, and executes without a change to Canvas node creation or rendering source. Do not scale WholeHouse Skill development before this gate passes.
-
-### Gate 2: user-selected model
-
-One Skill executes with at least two compatible provider/model choices selected by the user. The Skill definition remains unchanged, and no runtime silently changes the selection.
-
-### Gate 3: Codex dynamic workflow
-
-Codex reads Canvas selection through an API, searches Skills, proposes a workflow, waits for confirmation, creates nodes through the domain API, executes, and records a traceable result.
-
-## Proposal-required decisions
-
-Stop and write a proposal before any of these changes:
-
-- replacing the frontend framework;
-- replacing the primary database strategy;
-- deleting a Legacy node family or Canvas mode;
-- changing the canonical NodeRecord incompatibly;
-- changing the Codex Harness/App Server integration contract;
-- introducing a large infrastructure dependency;
-- enabling Agent auto-modification by default;
-- placing Industry Pack behavior in Core.
-
-Each proposal must contain Problem, Constraints, Options, Recommendation, Migration Cost, Compatibility Impact, Security Impact, Rollback, and Acceptance Criteria.
-
-## V1 non-goals
-
-Do not expand V1 into production ERP, CNC, automatic nesting, production scheduling, edge banding, packaging, logistics, installation, after-sales, full CRM, public Skill Marketplace, native desktop/mobile applications, autonomous control of Kujiale or Guigui, complex enterprise RBAC, multi-industry commercial operation, or production-grade automatic order splitting.
-
-The V1 handoff boundary is a versioned Design/CAD Handoff containing inspectable JSON, PDF, CSV, and image artifacts. SVG and DXF come only after the handoff contract is stable.
-
-## Required completion report
-
-Every implementation round must report:
-
-1. completed work;
-2. modified files;
-3. added files;
-4. deleted files;
-5. architecture changes;
-6. database changes;
-7. API changes;
-8. UI changes;
-9. compatibility impact;
-10. automated test results;
-11. manual test steps;
-12. known issues;
-13. recommended next step.
-
-Do not report completion when required tests could not run. Report the exact blocker and distinguish authored changes from verified behavior.
+Do not mark a Gate complete merely because code exists.
