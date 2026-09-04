@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-workbench.local/schemas/node-record/workbench.edge-1.json",
+  "title": "Workbench EdgeRecord v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "canvas_id", "from", "to", "revision"],
+  "properties": {
+    "schema_version": {"const": "workbench.edge/1"},
+    "id": {"type": "string", "minLength": 1},
+    "canvas_id": {"type": "string", "minLength": 1},
+    "from": {"$ref": "#/$defs/endpoint"},
+    "to": {"$ref": "#/$defs/endpoint"},
+    "state": {"enum": ["active", "disabled"]},
+    "metadata": {"type": "object"},
+    "revision": {"type": "integer", "minimum": 1}
+  },
+  "$defs": {
+    "endpoint": {"type": "object", "additionalProperties": false, "required": ["node_id", "port_id"], "properties": {"node_id": {"type": "string", "minLength": 1}, "port_id": {"type": "string", "minLength": 1}}}
+  }
+}

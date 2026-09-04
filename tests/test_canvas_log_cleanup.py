@@ -93,6 +93,15 @@ class CanvasLogCleanupTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(main.generated_media_path_from_url("/output/same.png"), str(legacy_output.resolve()))
 
+    def test_output_url_rejects_path_and_symlink_escape(self):
+        outside = self.root / "private.png"
+        outside.write_bytes(b"private")
+        (self.generated / "escaped.png").symlink_to(outside)
+
+        self.assertIsNone(main.output_file_from_url("/assets/output/../../private.png"))
+        self.assertIsNone(main.output_file_from_url("/assets/output/%2e%2e/%2e%2e/private.png"))
+        self.assertIsNone(main.output_file_from_url("/assets/output/escaped.png"))
+
     async def test_record_only_keeps_media(self):
         path, url = self.generated_file()
         self.write_canvas("record_only", [{"id": "log-1", "outputs": [url]}])

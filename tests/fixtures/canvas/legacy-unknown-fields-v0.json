@@ -1,0 +1,22 @@
+{
+  "id": "fixture-unknown-v0",
+  "title": "Unknown field fixture",
+  "kind": "classic",
+  "project": "fixture-project",
+  "created_at": 1700000000000,
+  "updated_at": 1700000000100,
+  "nodes": [
+    {
+      "id": "legacy-custom-1",
+      "type": "workflow-custom",
+      "x": 50,
+      "y": 60,
+      "vendor_extension": {"provider": "fixture", "opaque": [1, 2, 3]},
+      "future_field": "preserve-me"
+    }
+  ],
+  "connections": [],
+  "viewport": {"x": 0, "y": 0, "scale": 1},
+  "settings": {"future_setting": {"enabled": true}},
+  "top_level_extension": {"schema": "unknown/9", "value": "preserve-me"}
+}

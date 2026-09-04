@@ -1,0 +1,37 @@
+{
+  "id": "fixture-classic-v0",
+  "title": "Classic legacy fixture",
+  "icon": "layers",
+  "kind": "classic",
+  "owner": "fixture-owner",
+  "color": "blue",
+  "pinned": true,
+  "project": "fixture-project",
+  "created_at": 1700000000000,
+  "updated_at": 1700000000100,
+  "nodes": [
+    {"id": "image-1", "type": "image", "x": 20, "y": 30, "url": "/assets/input/reference.png", "name": "reference.png"},
+    {"id": "prompt-1", "type": "prompt", "x": 260, "y": 30, "text": "fixture prompt"},
+    {"id": "loop-1", "type": "loop", "x": 500, "y": 30, "count": 2, "mode": "serial"},
+    {"id": "group-1", "type": "group", "x": 10, "y": 220, "w": 320, "h": 200, "items": ["image-1", "prompt-1"]},
+    {"id": "prompt-group-1", "type": "promptGroup", "x": 360, "y": 220, "w": 320, "h": 200, "items": ["prompt-1"]},
+    {"id": "llm-1", "type": "llm", "x": 720, "y": 30, "llmProvider": "fixture", "model": "fixture-chat"},
+    {"id": "generator-1", "type": "generator", "x": 720, "y": 220, "apiProvider": "fixture", "model": "fixture-image", "inputs": []},
+    {"id": "midjourney-1", "type": "midjourney", "x": 1040, "y": 30, "apiProvider": "fixture", "inputs": []},
+    {"id": "msgen-1", "type": "msgen", "x": 1040, "y": 220, "msgenModel": "zimage", "inputs": []},
+    {"id": "video-1", "type": "video", "x": 1360, "y": 30, "apiProvider": "fixture", "model": "fixture-video", "inputs": []},
+    {"id": "minimax-1", "type": "minimax", "x": 1360, "y": 220, "inputs": []},
+    {"id": "rh-1", "type": "rh", "x": 1680, "y": 30, "apiProvider": "runninghub", "inputs": []},
+    {"id": "comfy-1", "type": "comfy", "x": 1680, "y": 220, "workflow": "Z-Image.json", "inputs": []},
+    {"id": "ltx-1", "type": "ltxDirector", "x": 2000, "y": 30, "inputs": []},
+    {"id": "output-1", "type": "output", "x": 2000, "y": 220, "images": []}
+  ],
+  "connections": [
+    {"id": "connection-1", "from": "image-1", "to": "generator-1"},
+    {"id": "connection-2", "from": "prompt-1", "to": "generator-1"},
+    {"id": "connection-3", "from": "generator-1", "to": "output-1"}
+  ],
+  "viewport": {"x": -50, "y": 80, "scale": 0.8},
+  "logs": [{"id": "log-1", "outputs": ["/assets/output/fixture.png"]}],
+  "settings": {"fixture": true}
+}

@@ -7,11 +7,18 @@ fi
 if [ -z "$LAN_IP" ]; then
   LAN_IP="127.0.0.1"
 fi
-APP_URL="http://${LAN_IP}:3000/"
+WORKBENCH_HOST_VALUE="${WORKBENCH_HOST:-127.0.0.1}"
+WORKBENCH_PORT_VALUE="${WORKBENCH_PORT:-3000}"
+APP_URL="http://127.0.0.1:${WORKBENCH_PORT_VALUE}/"
 
 echo "Starting ComfyUI-API-Modelscope..."
 echo "Visit: ${APP_URL}"
-echo "Local: http://127.0.0.1:3000/"
+if [ "$WORKBENCH_HOST_VALUE" = "0.0.0.0" ] || [ "$WORKBENCH_HOST_VALUE" = "::" ]; then
+  echo "LAN: http://${LAN_IP}:${WORKBENCH_PORT_VALUE}/"
+  echo "WARNING: LAN mode is unauthenticated; use only on a trusted network."
+else
+  echo "LAN is disabled by default. Enable explicitly: WORKBENCH_HOST=0.0.0.0 $0"
+fi
 echo "Press Ctrl+C to stop."
 echo ""
 

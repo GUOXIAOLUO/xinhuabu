@@ -1,1 +1,41 @@
 .DS_Store
+
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+API/.env
+API/*.local
+
+# Python, JavaScript, and test tooling
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+node_modules/
+
+# Local runtime state. Deliberate seed data remains tracked.
+global_config.json
+history.json
+data/api_providers.json
+data/projects.json
+data/prompt_libraries.json
+data/shared_folders.json
+data/canvases/
+data/conversations/
+data/media_previews/
+data/audit/
+data/*.sqlite
+data/*.sqlite3
+data/*.db
+
+# Generated and user-uploaded media
+assets/input/
+assets/output/
+assets/uploads/
+output/*
+!output/.gitkeep

@@ -89,6 +89,21 @@ function canvasVideoPlayerHtml(url, attrs=''){
     const src = canvasDisplayMediaUrl(original);
     return `<video src="${escapeAttr(src)}" data-url="${escapeAttr(original)}" controls autoplay playsinline preload="metadata" disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"${attrs ? ` ${attrs}` : ''}></video>`;
 }
+function bindCanvasVideoOverlay(video){
+    if(!video || video.dataset.canvasVideoOverlayBound === '1') return;
+    video.dataset.canvasVideoOverlayBound = '1';
+    const sync = () => {
+        const overlay = video.parentElement?.querySelector?.('.canvas-video-play');
+        if(overlay) overlay.style.display = !video.paused && !video.ended ? 'none' : '';
+    };
+    ['play', 'playing', 'pause', 'ended'].forEach(type => video.addEventListener(type, sync));
+    // Keep native player controls from driving Canvas selection or rerendering.
+    // Deliberately do not preventDefault so normal browser playback remains intact.
+    ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'wheel'].forEach(type => {
+        video.addEventListener(type, event => event.stopPropagation());
+    });
+    sync();
+}
 function canvasActivateVideoPreview(img){
     if(!img) return false;
     const target = img.matches?.('img[data-preview-kind="video"]') ? img : img.querySelector?.('img[data-preview-kind="video"]');
@@ -109,6 +124,7 @@ function canvasActivateVideoPreview(img){
     const video = tpl.content.firstElementChild;
     if(!video) return false;
     target.replaceWith(video);
+    bindCanvasVideoOverlay(video);
     video.parentElement?.querySelector?.('.canvas-video-play')?.style?.setProperty('display', 'none');
     video.play?.().catch(() => {});
     return true;
@@ -128,12 +144,15 @@ function bindCanvasPreviewImageFallbacks(root=document){
             if(img.dataset.previewKind === 'video'){
                 const video = document.createElement('template');
                 video.innerHTML = canvasVideoFallbackHtml(original, img.dataset.videoFallbackAttrs || '');
-                img.replaceWith(video.content.firstElementChild);
+                const fallback = video.content.firstElementChild;
+                img.replaceWith(fallback);
+                bindCanvasVideoOverlay(fallback);
                 return;
             }
             if(original && img.getAttribute('src') !== original) img.src = original;
         });
     });
+    root.querySelectorAll?.('video[data-inline-video-active]').forEach(bindCanvasVideoOverlay);
 }
 const CANVAS_SELECTED_HIGH_RES_DELAY = 320;
 const CANVAS_HIGH_RES_ZOOM_THRESHOLD = 0.86;
@@ -359,6 +378,7 @@ let dragBoard = null;
 let minimapDrag = false;
 let minimapState = null;
 let minimapRenderQueued = false;
+let minimapViewportQueued = false;
 let linksRenderQueued = false;
 let zoomPreviewState = null;
 let resizeNode = null;
@@ -375,6 +395,72 @@ let menuPoint = null;
 let linkCreateState = null;
 let internalDrag = false;
 let selected = new Set();
+// Opt-in shared state while the two page adapters are being converged. It
+// owns only generic viewport, selection and geometry state; this page keeps
+// rendering and persistence compatibility.
+const canvasUnifiedRuntimeEnabled = new URLSearchParams(window.location.search).get('unified_canvas') === '1'
+    && Boolean(window.WorkbenchCanvasRuntime);
+let canvasUnifiedRuntime = null;
+function canvasRuntimeGeometry(){
+    return nodes.map(node => {
+        const size = defaultNodeSize(node.type);
+        return {id:node.id, x:Number(node.x) || 0, y:Number(node.y) || 0, w:Number(node.w) || size.w, h:Number(node.h) || size.h};
+    });
+}
+function ensureCanvasUnifiedRuntime(){
+    if(!canvasUnifiedRuntimeEnabled) return null;
+    if(!canvasUnifiedRuntime){
+        canvasUnifiedRuntime = window.WorkbenchCanvasRuntime.create({
+            viewport, geometry:canvasRuntimeGeometry(), selectedIds:[...selected], minScale:0.12, maxScale:8,
+        });
+    }
+    return canvasUnifiedRuntime;
+}
+function syncCanvasRuntimeGeometry(runtime=ensureCanvasUnifiedRuntime()){
+    if(!runtime) return null;
+    runtime.dispatch({type:window.WorkbenchCanvasRuntime.COMMANDS.GEOMETRY_REPLACE, geometry:canvasRuntimeGeometry()});
+    return runtime;
+}
+function applyCanvasRuntimeViewport(command){
+    const runtime = ensureCanvasUnifiedRuntime();
+    if(!runtime) return false;
+    runtime.dispatch(command);
+    viewport = {...runtime.snapshot().viewport};
+    return true;
+}
+function applyCanvasRuntimeSelection(ids, toggleId=''){
+    const runtime = syncCanvasRuntimeGeometry();
+    if(!runtime) return false;
+    runtime.dispatch(toggleId
+        ? {type:window.WorkbenchCanvasRuntime.COMMANDS.SELECTION_TOGGLE, id:toggleId}
+        : {type:window.WorkbenchCanvasRuntime.COMMANDS.SELECTION_REPLACE, ids});
+    selected = new Set(runtime.snapshot().selectedIds);
+    return true;
+}
+function clearCanvasRuntimeSelection(){
+    const runtime = ensureCanvasUnifiedRuntime();
+    if(!runtime) return false;
+    runtime.dispatch({type:window.WorkbenchCanvasRuntime.COMMANDS.SELECTION_CLEAR});
+    selected = new Set();
+    return true;
+}
+function applyCanvasRuntimeNodeMove(node){
+    const runtime = ensureCanvasUnifiedRuntime();
+    if(!runtime || !node?.id) return false;
+    const command = {type:window.WorkbenchCanvasRuntime.COMMANDS.NODE_MOVE, id:node.id, x:Number(node.x) || 0, y:Number(node.y) || 0};
+    try { runtime.dispatch(command); }
+    catch(error) { syncCanvasRuntimeGeometry(runtime); runtime.dispatch(command); }
+    return true;
+}
+function applyCanvasRuntimeNodeResize(node){
+    const runtime = ensureCanvasUnifiedRuntime();
+    if(!runtime || !node?.id) return false;
+    const size = defaultNodeSize(node.type);
+    const command = {type:window.WorkbenchCanvasRuntime.COMMANDS.NODE_RESIZE, id:node.id, width:Number(node.w) || size.w, height:Number(node.h) || size.h};
+    try { runtime.dispatch(command); }
+    catch(error) { syncCanvasRuntimeGeometry(runtime); runtime.dispatch(command); }
+    return true;
+}
 let saveTimer = null;
 let creatingCanvas = false;
 let createCanvasKind = 'classic';
@@ -1195,8 +1281,81 @@ function screenToWorld(clientX, clientY){
 }
 function applyViewport(){
     world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
-    scheduleMinimapRender();
+    applyCanvasNodeShellSemanticZoom();
+    scheduleMinimapViewportUpdate();
     scheduleCanvasImageResolutionSync(nodesEl, 120);
+}
+function canvasNodeShellSemanticZoomEnabled(){
+    const params = new URLSearchParams(window.location.search);
+    return params.get('semantic_zoom') === '1'
+        && params.get('node_shell') === '1'
+        && window.WorkbenchNodeClient?.isLoopback?.()
+        && window.WorkbenchSemanticZoom;
+}
+function applyCanvasNodeShellSemanticZoom(){
+    if(!nodesEl) return;
+    const enabled = canvasNodeShellSemanticZoomEnabled();
+    nodesEl.classList.toggle('node-shell-semantic-zoom', Boolean(enabled));
+    const existingIndicator = shell?.querySelector?.('#canvasSemanticZoomIndicator');
+    // Semantic zoom is an explicit, page-load feature gate. Avoid walking every
+    // Legacy/NodeShell card on ordinary pan and minimap updates when it is off.
+    if(!enabled){
+        existingIndicator?.remove();
+        return;
+    }
+    const setVisible = (element, visible, visibleDisplay='') => {
+        if(!element) return;
+        element.hidden = !visible;
+        element.style.display = visible ? visibleDisplay : 'none';
+    };
+    const presentation = window.WorkbenchSemanticZoom.presentationForScale(viewport.scale);
+    const labels = {full:'完整', summary:'摘要'};
+    const indicator = existingIndicator || document.createElement('output');
+    indicator.id = 'canvasSemanticZoomIndicator';
+    indicator.className = 'canvas-semantic-zoom-indicator';
+    indicator.setAttribute('aria-live', 'polite');
+    indicator.value = String(Math.round(viewport.scale * 100));
+    indicator.textContent = `${Math.round(viewport.scale * 100)}% · ${labels[presentation] || presentation} · ${nodes.length} 节点`;
+    if(!existingIndicator) shell.appendChild(indicator);
+    nodesEl.querySelectorAll('.node.node-shell-mounted').forEach(nodeEl => {
+        const shellEl = nodeEl.querySelector('.workbench-node-shell');
+        const node = nodes.find(item => item.id === nodeEl.dataset.id);
+        if(!shellEl || !node) return;
+        const slots = {
+            title:shellEl.querySelector('.workbench-node-shell__title'),
+            status:shellEl.querySelector('.workbench-node-shell__status'),
+            actions:shellEl.querySelector('.workbench-node-shell__actions'),
+            content:shellEl.querySelector('.workbench-node-shell__content'),
+            toolbar:shellEl.querySelector('.workbench-node-shell__toolbar'),
+            footer:shellEl.querySelector('.workbench-node-shell__footer'),
+        };
+        const model = window.WorkbenchSemanticZoom.viewModel(node, viewport.scale);
+        nodeEl.dataset.semanticPresentation = model.presentation;
+        shellEl.dataset.semanticPresentation = model.presentation;
+        shellEl.dataset.semanticControls = String(model.showControls);
+        shellEl.dataset.semanticPorts = String(model.showPorts);
+        setVisible(slots.title, model.showTitle);
+        setVisible(slots.status, model.showSummary, 'inline');
+        setVisible(slots.content, model.showContent);
+        [slots.actions, slots.toolbar, slots.footer].forEach(slot => setVisible(slot, model.showControls));
+        nodeEl.querySelectorAll(':scope > .workbench-node-shell__port').forEach(port => setVisible(port, model.showPorts));
+    });
+    nodesEl.querySelectorAll('.node:not(.node-shell-mounted)').forEach(nodeEl => {
+        const node = nodes.find(item => item.id === nodeEl.dataset.id);
+        if(!node) return;
+        const targets = {
+            head:nodeEl.querySelector(':scope > .node-head'),
+            body:nodeEl.querySelector(':scope > .node-body'),
+            resize:nodeEl.querySelector(':scope > .resize-handle'),
+        };
+        const ports = [...nodeEl.querySelectorAll(':scope > .port')];
+        const model = window.WorkbenchSemanticZoom.viewModel(node, viewport.scale);
+        nodeEl.dataset.semanticPresentation = model.presentation;
+        setVisible(targets.head, model.showTitle, 'flex');
+        setVisible(targets.body, model.showContent);
+        setVisible(targets.resize, model.showControls);
+        ports.forEach(port => setVisible(port, model.showPorts));
+    });
 }
 function estimatedNodeRect(n){
     const el = nodesEl?.querySelector?.(`.node[data-id="${CSS.escape(n.id)}"]`);
@@ -1235,6 +1394,24 @@ function scheduleMinimapRender(){
     requestAnimationFrame(() => {
         minimapRenderQueued = false;
         renderMinimap();
+    });
+}
+// Viewport-only movement must not rebuild every minimap node. Geometry changes
+// still use scheduleMinimapRender so bounds and node rectangles stay accurate.
+function scheduleMinimapViewportUpdate(){
+    if(!minimapViewport || !minimapState){
+        scheduleMinimapRender();
+        return;
+    }
+    if(minimapViewportQueued) return;
+    minimapViewportQueued = true;
+    requestAnimationFrame(() => {
+        minimapViewportQueued = false;
+        if(!minimapViewport || !minimapState){
+            scheduleMinimapRender();
+            return;
+        }
+        updateMinimapViewport();
     });
 }
 // 拖动/缩放节点时每个 mousemove 都全量重建连线 SVG 会掉帧；用 rAF 合并成每帧最多刷新一次。
@@ -1297,6 +1474,15 @@ function safeViewportScale(value){
 }
 function fitAllNodesViewport(){
     const rect = board.getBoundingClientRect();
+    if(window.WorkbenchCanvasViewportRecovery){
+        const fitted = window.WorkbenchCanvasViewportRecovery.fit(nodes.map(estimatedNodeRect), {width:rect.width, height:rect.height}, {padding:180, inset:80, minScale:.06, maxScale:.82, emptyScale:.45});
+        viewport = {...fitted};
+        applyViewport();
+        renderLinks();
+        renderSelectionHub();
+        scheduleViewportSave();
+        return;
+    }
     if(!nodes.length){
         viewport.scale = 0.45;
         viewport.x = rect.width / 2;
@@ -1532,7 +1718,10 @@ async function loadConfig(){
         }
         runningHubWorkflowCache = {};
         const rhProvider = apiProviders.find(p => p.id === 'runninghub');
-        const rhWorkflowIds = (rhProvider?.rh_workflows || []).map(item => String(item.workflowId || item.id || '').trim()).filter(Boolean);
+        const rhWorkflowIds = (rhProvider?.rh_workflows || [])
+            .filter(rhWorkflowEntryHasSavedConfig)
+            .map(item => String(item.workflowId || item.id || '').trim())
+            .filter(Boolean);
         await Promise.all(rhWorkflowIds.map(async workflowId => {
             try { await ensureRunningHubWorkflow(workflowId); } catch(_) {}
         }));
@@ -1689,19 +1878,6 @@ function updateCanvasListRecord(record){
     else canvases.unshift(record);
     sortCanvasListByUpdated();
     renderCanvasList();
-}
-async function touchCanvasOpened(id){
-    if(!id) return null;
-    try {
-        const res = await fetch(`/api/canvases/${encodeURIComponent(id)}/touch`, {method:'POST'});
-        if(!res.ok) return null;
-        const data = await res.json();
-        if(data.canvas) updateCanvasListRecord(data.canvas);
-        return data.canvas || data;
-    } catch(e) {
-        console.warn('touch canvas failed', e);
-        return null;
-    }
 }
 function renderCanvasListInto(list){
     if(!list) return;
@@ -2062,8 +2238,6 @@ async function openCanvas(id){
         resetCascadeRuntimeState();
         canvas = data.canvas;
         rememberCanvasListProject(canvas.project || 'default');
-        const touched = await touchCanvasOpened(canvas.id);
-        if(touched?.updated_at) canvas.updated_at = Number(touched.updated_at);
         if((canvas.kind || 'classic') === 'smart'){
             openSmartCanvasPage(canvas.id);
             return;
@@ -2500,6 +2674,89 @@ function addNode(node){
     return node;
 }
 function defaultPoint(dx=0, dy=0){ return screenToWorld(window.innerWidth / 2 + dx, window.innerHeight / 2 + dy); }
+function canUseVersionedImageCreation(){
+    return Boolean(window.WorkbenchNodeClient?.isLoopback?.() && window.WorkbenchNodeClient?.isEnabled?.() && canvas?.id && canvas?.project);
+}
+async function addVersionedBlankImageNode(point){
+    if(!canUseVersionedImageCreation()) return null;
+    const p = point || defaultPoint(-120, 0);
+    const undoSnapshot = {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    try {
+        const result = await window.WorkbenchNodeClient.create(canvas.id, {
+            request_id:`${CLIENT_ID}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            project_id:canvas.project,
+            source:'context_menu',
+            definition_ref:{type:'legacy', id:'image', version:'0'},
+            position:{x:p.x, y:p.y},
+            expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
+            title:'空白图片',
+        }, CLIENT_ID);
+        const node = {id:result.node.id, type:'image', x:p.x, y:p.y, url:'', name:result.node.title || '空白图片'};
+        nodes.push(node);
+        undoStack.push(undoSnapshot);
+        if(undoStack.length > UNDO_MAX) undoStack.shift();
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+        render();
+        return node;
+    } catch(error) {
+        console.error('Versioned Image creation failed', error);
+        setStatus('Create failed');
+        return null;
+    }
+}
+async function addVersionedBlankPromptNode(point){
+    if(!canUseVersionedImageCreation()) return null;
+    const p = point || defaultPoint(0, 0);
+    const undoSnapshot = {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    try {
+        const result = await window.WorkbenchNodeClient.create(canvas.id, {
+            request_id:`${CLIENT_ID}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            project_id:canvas.project, source:'context_menu',
+            definition_ref:{type:'legacy', id:'prompt', version:'0'},
+            position:{x:p.x, y:p.y}, expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
+            initial_config:{text:''}, title:'Prompt',
+        }, CLIENT_ID);
+        const node = {id:result.node.id, type:'prompt', x:p.x, y:p.y, text:''};
+        nodes.push(node);
+        undoStack.push(undoSnapshot);
+        if(undoStack.length > UNDO_MAX) undoStack.shift();
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+        render();
+        return node;
+    } catch(error) {
+        console.error('Versioned Prompt creation failed', error);
+        setStatus('Create failed');
+        return null;
+    }
+}
+async function addVersionedBlankLoopNode(point){
+    if(!canUseVersionedImageCreation()) return null;
+    const p = point || defaultPoint(40, 0);
+    const undoSnapshot = {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    try {
+        const result = await window.WorkbenchNodeClient.create(canvas.id, {
+            request_id:`${CLIENT_ID}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            project_id:canvas.project, source:'context_menu',
+            definition_ref:{type:'legacy', id:'loop', version:'0'},
+            position:{x:p.x, y:p.y}, expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
+            initial_config:{count:3}, title:'Loop',
+        }, CLIENT_ID);
+        const node = {id:result.node.id, type:'loop', x:p.x, y:p.y, count:3, mode:'serial', showPrompt:false, imageInput:false, videoInput:false, loopStart:1, imageBatchSize:1, videoBatchSize:1, variablePrompt:'', fixedPrompt:''};
+        nodes.push(node);
+        undoStack.push(undoSnapshot);
+        if(undoStack.length > UNDO_MAX) undoStack.shift();
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+        render();
+        return node;
+    } catch(error) {
+        console.error('Versioned Loop creation failed', error);
+        setStatus('Create failed');
+        return null;
+    }
+}
 function addImageNode(point){
     const p = point || defaultPoint(-120, 0);
     return addNode({id:uid('img'), type:'image', x:p.x, y:p.y, url:'', name:'空白图片'});
@@ -2526,6 +2783,31 @@ function addLoopNode(point){
         variablePrompt:'',
         fixedPrompt:''
     });
+}
+async function addVersionedBlankGroupNode(point){
+    if(!canUseVersionedImageCreation()) return null;
+    const p = point || defaultPoint(40, 0);
+    const undoSnapshot = {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    try {
+        const result = await window.WorkbenchNodeClient.create(canvas.id, {
+            request_id:`${CLIENT_ID}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            project_id:canvas.project, source:'context_menu',
+            definition_ref:{type:'legacy', id:'group', version:'0'},
+            position:{x:p.x, y:p.y}, expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0), title:'Group',
+        }, CLIENT_ID);
+        const node = {id:result.node.id, type:'group', x:p.x, y:p.y, w:300, h:220, items:[]};
+        nodes.push(node);
+        undoStack.push(undoSnapshot);
+        if(undoStack.length > UNDO_MAX) undoStack.shift();
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+        render();
+        return node;
+    } catch(error) {
+        console.error('Versioned Group creation failed', error);
+        setStatus('Create failed');
+        return null;
+    }
 }
 function addGroupNode(point){
     const p = point || defaultPoint(40, 0);
@@ -3209,9 +3491,16 @@ function addOutputNode(point){
     const p = point || defaultPoint(260, 0);
     return addNode({id:uid('out'), type:'output', x:p.x, y:p.y, images:[]});
 }
+function syncClassicCreateMenuCommands(){
+    if(!createMenu || !window.WorkbenchCanvasCommands) return;
+    const buttons = createMenu.querySelectorAll(':scope > [data-canvas-command]');
+    const catalog = window.WorkbenchCanvasCommands.creationCatalogFor('classic');
+    window.WorkbenchCanvasCommands.orderCreateMenuItems(buttons, catalog).forEach(button => createMenu.append(button));
+}
 function openCreateMenu(clientX, clientY){
     menuPoint = screenToWorld(clientX, clientY);
     closeLinkCreateMenu();
+    syncClassicCreateMenuCommands();
     createMenu.style.left = `${clientX}px`;
     createMenu.style.top = `${clientY}px`;
     createMenu.classList.add('open');
@@ -3253,6 +3542,7 @@ function linkCreateOptions(state){
     return [];
 }
 function openLinkCreateMenu(originId, originKind, clientX, clientY){
+    if(!window.WorkbenchCanvasCommands?.graphCommand('canvas.graph.create-connected', 'classic')) return false;
     const state = {originId, originKind, point:screenToWorld(clientX, clientY)};
     const options = linkCreateOptions(state);
     if(!options.length) return false;
@@ -3581,14 +3871,26 @@ async function downloadGroupNodeImages(groupId){
         alert(err.message || tr('canvas.outputDownloadEmpty'));
     }
 }
+const classicVersionedConnectedNodeCreators = Object.freeze({
+    group: createVersionedLinkedGroup,
+});
+function createVersionedClassicConnectedNode(command, state, origin){
+    const versionedCreator = classicVersionedConnectedNodeCreators[command?.createType];
+    if(!versionedCreator || !canUseVersionedImageCreation() || !window.WorkbenchCanvasCommands?.usesVersionedConnectedCreation(command, 'classic')) return false;
+    void versionedCreator(state, origin);
+    return true;
+}
 function createLinkedNode(type){
     const state = linkCreateState;
     closeLinkCreateMenu();
     if(!state) return;
     const origin = nodes.find(n => n.id === state.originId);
     if(!origin) return;
+    const command = window.WorkbenchCanvasCommands?.createCommand(type, 'classic');
+    if(!command) return;
+    if(createVersionedClassicConnectedNode(command, state, origin)) return;
     pushUndo();
-    const created = createNodeByType(type, state.point);
+    const created = createNodeByType(command.createType, state.point);
     if(!created) return;
     const fromId = state.originKind === 'out' ? origin.id : created.id;
     const toId = state.originKind === 'out' ? created.id : origin.id;
@@ -3598,6 +3900,32 @@ function createLinkedNode(type){
         syncGeneratorInputs();
         scheduleSave();
         render();
+    }
+}
+async function createVersionedLinkedGroup(state, origin){
+    const undoSnapshot = {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    const edgeId = uid('c');
+    try {
+        const result = await window.WorkbenchNodeClient.createNodeAndEdge(canvas.id, {
+            request_id:`${CLIENT_ID}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            project_id:canvas.project, source:'context_menu',
+            definition_ref:{type:'legacy', id:'group', version:'0'}, position:{x:state.point.x, y:state.point.y},
+            expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0), title:'Group',
+            existing_node_id:origin.id, edge_id:edgeId,
+            direction:state.originKind === 'out' ? 'from_existing' : 'to_existing',
+        }, CLIENT_ID);
+        nodes.push({id:result.node.id, type:'group', x:state.point.x, y:state.point.y, w:300, h:220, items:[]});
+        connections.push({id:result.edge.id, from:result.edge.from.node_id, to:result.edge.to.node_id});
+        undoStack.push(undoSnapshot);
+        if(undoStack.length > UNDO_MAX) undoStack.shift();
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+        syncLatestGeneratedOutputToConnection(result.edge.from.node_id, result.edge.to.node_id);
+        syncGeneratorInputs();
+        render();
+    } catch(error) {
+        console.error('Versioned Group creation failed', error);
+        setStatus('Create failed');
     }
 }
 function createNodeByType(type, point){
@@ -3617,21 +3945,31 @@ function createNodeByType(type, point){
     if(type === 'output') return addOutputNode(point);
     return null;
 }
+const classicVersionedBlankNodeCreators = Object.freeze({
+    image: addVersionedBlankImageNode,
+    prompt: addVersionedBlankPromptNode,
+    loop: addVersionedBlankLoopNode,
+    group: addVersionedBlankGroupNode,
+});
+function createClassicMenuNode(command, point){
+    const versionedCreator = classicVersionedBlankNodeCreators[command?.createType];
+    if(versionedCreator && canUseVersionedImageCreation() && window.WorkbenchCanvasCommands?.usesVersionedBlankCreation(command, 'classic')) {
+        void versionedCreator(point);
+        return null;
+    }
+    return createNodeByType(command?.createType, point);
+}
 function menuAdd(type){
+    const command = window.WorkbenchCanvasCommands?.createCommand(type, 'classic');
+    if(!command) return;
     closeCreateMenu();
-    if(type === 'image') addImageNode(menuPoint);
-    if(type === 'prompt') addPromptNode(menuPoint);
-    if(type === 'loop') addLoopNode(menuPoint);
-    if(type === 'llm') addLLMNode(menuPoint);
-    if(type === 'generator') addGeneratorNode(menuPoint);
-    if(type === 'midjourney') addMidjourneyNode(menuPoint);
-    if(type === 'msgen') addMsGenNode(menuPoint);
-    if(type === 'video') addVideoNode(menuPoint);
-    if(type === 'minimax') addMiniMaxNode(menuPoint);
-    if(type === 'rh') addRhNode(menuPoint);
-    if(type === 'comfy') addComfyNode(menuPoint);
-    if(type === 'ltxDirector') addLTXDirectorNode(menuPoint);
-    if(type === 'output') addOutputNode(menuPoint);
+    return createClassicMenuNode(command, menuPoint);
+}
+function quickAdd(type){
+    const command = window.WorkbenchCanvasCommands?.createCommand(type, 'classic');
+    if(!command) return null;
+    const point = defaultPoint(0, 0);
+    return createClassicMenuNode(command, point);
 }
 function mediaKindForUpload(file){
     const type = String(file?.type || '').toLowerCase();
@@ -5963,6 +6301,8 @@ function render(){
     syncCanvasSelectedImageResolution(nodesEl);
     measureCanvasOriginalImageNodes(nodesEl);
     refreshOutputTimer();
+    applyCanvasNodeShellSemanticZoom();
+    scheduleMinimapRender();
 }
 function refreshNodes(ids=[]){
     const uniqueIds = [...new Set((ids || []).filter(Boolean))];
@@ -5994,6 +6334,7 @@ function refreshNodes(ids=[]){
     syncCanvasSelectedImageResolution(nodesEl);
     measureCanvasOriginalImageNodes(nodesEl);
     refreshOutputTimer();
+    scheduleMinimapRender();
 }
 function refreshRunNodes(node, out=null){
     refreshNodes([node?.id, out?.id]);
@@ -6125,6 +6466,184 @@ function destroyLTXEditor(node){
 function isNodeDragSurface(target){
     return !isNodeControl(target) && !target.closest('.port, .resize-handle, .output-img-wrap');
 }
+function canUseCanvasMediaRenderer(node){
+    const enabled = new URLSearchParams(window.location.search).get('media_renderer') === '1';
+    if(!enabled || !window.WorkbenchNodeClient?.isLoopback?.() || !window.WorkbenchMediaRenderer) return false;
+    if(node?.type === 'image') return Boolean(node.url);
+    return node?.type === 'group' && (node.items || []).some(id => {
+        const item = nodes.find(candidate => candidate.id === id);
+        return item?.type === 'image' && item.url;
+    });
+}
+function canvasNodeShellBaseEnabled(){
+    const params = new URLSearchParams(window.location.search);
+    return params.get('node_shell') === '1'
+        && window.WorkbenchNodeClient?.isLoopback?.()
+        && window.WorkbenchNodeShell
+        && window.WorkbenchUnifiedRenderHost;
+}
+function canvasNodeShellEnabled(){
+    const params = new URLSearchParams(window.location.search);
+    return canvasNodeShellBaseEnabled()
+        && params.get('media_renderer') === '1'
+        && window.WorkbenchMediaRenderer;
+}
+function canvasLegacyRendererEnabled(){
+    const params = new URLSearchParams(window.location.search);
+    return canvasNodeShellBaseEnabled()
+        && params.get('legacy_renderer') === '1'
+        && window.WorkbenchLegacyRenderer;
+}
+function canUseCanvasNodeShellForMedia(node){
+    // A group is a graph container even while it has no media members.  Mount it
+    // through the same shell so it keeps the common input/output port contract.
+    return canvasNodeShellEnabled() && (canUseCanvasMediaRenderer(node) || node?.type === 'group');
+}
+function canUseCanvasNodeShellForLegacy(node){
+    // Form/task nodes keep their source-owned body while the shared host owns
+    // chrome, menu, resize, and their declared connection ports.
+    return canvasLegacyRendererEnabled() && ['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type);
+}
+function canvasLegacyNodeShellPorts(node){
+    if(node?.type === 'prompt') return {input:false, output:true};
+    // A Loop can be connected before its input mode is configured. Keeping its
+    // input port visible makes connection creation independent of that setting.
+    if(node?.type === 'loop') return {input:true, output:true};
+    // Output nodes are still valid sources for downstream composition in the
+    // existing Canvas contract, so their two Legacy ports stay visible.
+    if(node?.type === 'output') return {input:true, output:true};
+    // LLM nodes retain their established graph contract: upstream context in,
+    // generated text out.
+    if(node?.type === 'llm') return {input:true, output:true};
+    // Generator nodes keep their input/reference and result-output contract;
+    // provider configuration and execution remain owned by the Legacy body.
+    if(node?.type === 'generator') return {input:true, output:true};
+    // Midjourney keeps the same graph contract while its mode, version, and
+    // task-continuation controls remain in the Legacy body.
+    if(node?.type === 'midjourney') return {input:true, output:true};
+    // ModelScope Generation keeps its model tabs and parameter form in the
+    // Legacy body while retaining the established graph ports.
+    if(node?.type === 'msgen') return {input:true, output:true};
+    // Video Generation keeps media controls and provider configuration in its
+    // Legacy body while retaining the established graph ports.
+    if(node?.type === 'video') return {input:true, output:true};
+    // Comfy workflow selection, field schemas, and execution remain owned by
+    // the Legacy body while the shared shell preserves its graph ports.
+    if(node?.type === 'comfy') return {input:true, output:true};
+    // RunningHub entry selection, parameter schemas, and execution remain
+    // Legacy-owned while the shared shell preserves its graph ports.
+    if(node?.type === 'rh') return {input:true, output:true};
+    // LTX Director keeps its timeline editor, parameter controls, and run
+    // behavior in the Legacy body while the shared shell preserves its ports.
+    if(node?.type === 'ltxDirector') return {input:true, output:true};
+    // MiniMax keeps its timeline, media library, clip settings, and execution
+    // in the Legacy body while the shared shell preserves its graph ports.
+    if(node?.type === 'minimax') return {input:true, output:true};
+    // Prompt Groups retain the existing output-only aggregation contract; their
+    // member membership and summarized text remain owned by the Legacy body.
+    if(node?.type === 'promptGroup') return {input:false, output:true};
+    return {input:true, output:true};
+}
+function canvasShellPointer(detail={}){
+    return {
+        button:0,
+        clientX:Number(detail.clientX) || 0,
+        clientY:Number(detail.clientY) || 0,
+        altKey:Boolean(detail.altKey),
+        shiftKey:Boolean(detail.shiftKey),
+        ctrlKey:Boolean(detail.ctrlKey),
+        metaKey:Boolean(detail.metaKey),
+        preventDefault(){},
+        stopPropagation(){},
+    };
+}
+function selectCanvasNodeFromShell(nodeId){
+    if(!nodes.some(node => node.id === nodeId)) return;
+    selected.clear();
+    selected.add(nodeId);
+    refreshSelectionVisuals();
+}
+const canvasNodeShellIntentAdapter = window.WorkbenchUnifiedRenderHost.createIntentAdapter({
+    select:intent => selectCanvasNodeFromShell(intent.nodeId),
+    focus:intent => selectCanvasNodeFromShell(intent.nodeId),
+    menu:intent => selectCanvasNodeFromShell(intent.nodeId),
+    delete:intent => deleteNodeFromButton(intent.nodeId),
+    drag_start:intent => {
+        const node = nodes.find(item => item.id === intent.nodeId);
+        if(node) startNodeDrag(canvasShellPointer(intent.detail), node);
+    },
+    resize_start:intent => {
+        const node = nodes.find(item => item.id === intent.nodeId);
+        if(node) startNodeResize(canvasShellPointer(intent.detail), node);
+    },
+    connect_start:intent => {
+        const node = nodes.find(item => item.id === intent.nodeId);
+        if(node) startLink(canvasShellPointer(intent.detail), node.id, intent.detail?.direction === 'input' ? 'in' : 'out');
+    },
+});
+function handleCanvasNodeShellIntent(intent){ canvasNodeShellIntentAdapter(intent); }
+function canvasMediaRecord(node){
+    const record = window.WorkbenchCanvas.legacyNodeView(node, {projectId:canvas?.project, canvasId:canvas?.id});
+    if(node?.type === 'group') {
+        record.output_refs = (node.items || []).map(id => nodes.find(candidate => candidate.id === id))
+            .filter(item => item?.type === 'image' && item.url)
+            .map(item => ({url:item.url, name:item.name || 'Media', type:mediaKindForNode(item)}));
+    }
+    return record;
+}
+const CANVAS_NODE_SHELL_LEGACY_CONTROLS = Object.freeze({
+    firstSelectors:Object.freeze(['.node-head']),
+    selectors:Object.freeze([':scope > .port, :scope > .resize-handle']),
+});
+function mountCanvasNodeShellForMedia(node, body, el){
+    if(!canUseCanvasNodeShellForMedia(node)) return false;
+    const record = canvasMediaRecord(node);
+    const hasRenderableMedia = window.WorkbenchMediaRenderer.canRender(record);
+    if(!hasRenderableMedia && node.type !== 'group') return false;
+    const useLegacyContent = !hasRenderableMedia && window.WorkbenchLegacyRenderer?.canRender(record);
+    const mounted = window.WorkbenchUnifiedRenderHost.mountAdapterCard({
+        document, node:record, card:el, contentHost:body,
+        preserveLegacyContent:useLegacyContent,
+        legacyContentClassName:'canvas-node-shell-legacy-content',
+        controlSettings:CANVAS_NODE_SHELL_LEGACY_CONTROLS,
+        cardClasses:['node-shell-mounted', hasRenderableMedia && 'media-renderer-mounted'],
+        ...window.WorkbenchUnifiedRenderHost.cardShellView({selected:selected.has(node.id), onIntent:handleCanvasNodeShellIntent}),
+    });
+    const nodeShell = mounted.shell;
+    if(!hasRenderableMedia && !useLegacyContent) {
+        const itemCount = (node.items || []).length;
+        const empty = document.createElement('div');
+        empty.className = 'workbench-node-shell__group-empty';
+        empty.textContent = itemCount ? `${itemCount} ${tr('canvas.grouped')}` : tr('canvas.groupEmpty');
+        nodeShell.contentHost.replaceChildren(empty);
+    }
+    // Legacy Canvas keeps link anchors on the outer card. The shared host
+    // preserves that geometry while NodeShell remains the interaction owner.
+    return true;
+}
+function mountCanvasNodeShellForLegacy(node, body, el){
+    if(!canUseCanvasNodeShellForLegacy(node)) return false;
+    const record = canvasMediaRecord(node);
+    const mounted = window.WorkbenchUnifiedRenderHost.mountAdapterCard({
+        document, node:record, card:el, contentHost:body, preserveLegacyContent:true,
+        legacyContentClassName:'canvas-node-shell-legacy-content',
+        controlSettings:CANVAS_NODE_SHELL_LEGACY_CONTROLS,
+        cardClasses:['node-shell-mounted', 'legacy-renderer-mounted'],
+        ...window.WorkbenchUnifiedRenderHost.cardShellView({selected:selected.has(node.id), onIntent:handleCanvasNodeShellIntent, ports:canvasLegacyNodeShellPorts(node)}),
+    });
+    const nodeShell = mounted.shell;
+    return true;
+}
+function mountCanvasMediaRenderer(node, body, el){
+    if(!canUseCanvasMediaRenderer(node)) return false;
+    const record = canvasMediaRecord(node);
+    if(!window.WorkbenchMediaRenderer.canRender(record)) return false;
+    window.WorkbenchUnifiedRenderHost.mountAdapterContent({
+        document, node:record, card:el, contentHost:body,
+        cardClasses:['media-renderer-mounted'],
+    });
+    return true;
+}
 function renderNode(node){
     normalizeApiNodeLayout(node);
     if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
@@ -6140,7 +6659,10 @@ function renderNode(node){
     el.onclick = (e) => {
         e.stopPropagation();
         if(isNodeControl(e.target)) return;
-        if(e.ctrlKey || e.metaKey) selected.has(node.id) ? selected.delete(node.id) : selected.add(node.id);
+        if(canvasUnifiedRuntimeEnabled) {
+            if(e.ctrlKey || e.metaKey) applyCanvasRuntimeSelection([], node.id);
+            else applyCanvasRuntimeSelection([node.id]);
+        } else if(e.ctrlKey || e.metaKey) selected.has(node.id) ? selected.delete(node.id) : selected.add(node.id);
         else if(!selected.has(node.id)) { selected.clear(); selected.add(node.id); }
         refreshSelectionVisuals();
     };
@@ -6187,6 +6709,7 @@ function renderNode(node){
                 else openImageNodePreview(node.id);
             };
             body.onmousedown = e => {
+                if(e.target.closest('video,audio')) return;
                 if(e.detail >= 2){
                     openPreview(e);
                     return;
@@ -6291,6 +6814,7 @@ function renderNode(node){
             body.style.cursor = 'zoom-in';
             body.onmousedown = e => {
                 if(e.button !== 0) return;
+                if(e.target.closest('video,audio')) return;
                 if(e.detail >= 2){
                     openGroupPreview(e);
                     return;
@@ -6323,6 +6847,7 @@ function renderNode(node){
         };
         body.querySelectorAll('.output-img-wrap').forEach(wrap => bindOutputWrap(wrap, node));
     }
+    if(!canUseCanvasNodeShellForMedia(node)) mountCanvasMediaRenderer(node, body, el);
     el.appendChild(body);
     el.querySelectorAll('button, select, textarea, input').forEach(control => {
         control.addEventListener('mousedown', e => e.stopPropagation(), true);
@@ -6355,6 +6880,7 @@ function renderNode(node){
     if(out) out.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'out'); };
     const inp = el.querySelector('.port.in');
     if(inp) inp.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'in'); };
+    if(!mountCanvasNodeShellForMedia(node, body, el)) mountCanvasNodeShellForLegacy(node, body, el);
     return el;
 }
 function bindOutputWrap(wrap, node){
@@ -9890,6 +10416,11 @@ function currentRunningHubWorkflowEntry(node){
 }
 function rhEntryFields(entry){
     return Array.isArray(entry?.fields) ? entry.fields : [];
+}
+function rhWorkflowEntryHasSavedConfig(entry){
+    return rhEntryFields(entry).length > 0
+        || !!(entry?.workflowJson && typeof entry.workflowJson === 'object' && Object.keys(entry.workflowJson).length)
+        || !!(entry?.raw && typeof entry.raw === 'object' && Object.keys(entry.raw).length);
 }
 function rhWorkflowJsonFromSources(...sources){
     for(const source of sources){
@@ -14642,6 +15173,7 @@ function closeOutputLightbox(){
     setupOutputPromptPanel(null);
 }
 function groupSelectedImages(){
+    if(!window.WorkbenchCanvasCommands?.selectionCommand('canvas.selection.group', 'classic')) return;
     if(!ensureCanvas()) return;
     const targets = [...selected].map(id => nodes.find(n => n.id === id)).filter(n => n?.type === 'image' || n?.type === 'prompt');
     let group;
@@ -15140,6 +15672,7 @@ function onNodeDrag(e){
     const dy = (e.clientY - dragNode.sy) / viewport.scale;
     dragNode.node.x = dragNode.ox + dx;
     dragNode.node.y = dragNode.oy + dy;
+    applyCanvasRuntimeNodeMove(dragNode.node);
     const el = nodesEl.querySelector(`.node[data-id="${dragNode.node.id}"]`);
     if(el){
         el.style.left = `${dragNode.node.x}px`;
@@ -15148,6 +15681,7 @@ function onNodeDrag(e){
     (dragNode.children || []).forEach(childDrag => {
         childDrag.node.x = childDrag.ox + dx;
         childDrag.node.y = childDrag.oy + dy;
+        applyCanvasRuntimeNodeMove(childDrag.node);
         const childEl = nodesEl.querySelector(`.node[data-id="${childDrag.node.id}"]`);
         if(childEl){
             childEl.style.left = `${childDrag.node.x}px`;
@@ -15182,6 +15716,7 @@ function onNodeResize(e){
     const nextH = Math.max(96, resizeNode.sh + (e.clientY - resizeNode.sy) / viewport.scale);
     resizeNode.node.w = Math.round(nextW);
     resizeNode.node.h = Math.round(nextH);
+    applyCanvasRuntimeNodeResize(resizeNode.node);
     const el = nodesEl.querySelector(`.node[data-id="${resizeNode.node.id}"]`);
     if(el){
         el.classList.add('sized');
@@ -15193,6 +15728,7 @@ function onNodeResize(e){
     scheduleMinimapRender();
 }
 function startLink(e, originId, originKind){
+    if(!window.WorkbenchCanvasCommands?.graphCommand('canvas.graph.connect', 'classic')) return;
     e.stopPropagation();
     originKind = originKind || 'out';
     const src = portPoint(originId, originKind);
@@ -15210,12 +15746,20 @@ function startLink(e, originId, originKind){
         const target = targetPort?.closest('.node');
         if(target){
             const targetId = target.dataset.id;
-            const fromId = originKind === 'out' ? originId : targetId;
-            const toId = originKind === 'out' ? targetId : originId;
-            if(canConnect(fromId, toId)){
+            const intent = window.WorkbenchCanvasGraphInteraction?.edgeIntentFromPortDrop(
+                {nodeId:originId, port:originKind}, {nodeId:targetId, port:targetKind}
+            );
+            if(intent && canConnect(intent.from, intent.to)){
+                const {from:fromId, to:toId} = intent;
                 if(!connections.some(c => c.from === fromId && c.to === toId)){
                     pushUndo();
                     connections.push({id:uid('c'), from:fromId, to:toId});
+                    const group = nodes.find(node => node.id === toId && node.type === 'group');
+                    const groupedNode = nodes.find(node => node.id === fromId);
+                    if(group && ['image','prompt'].includes(groupedNode?.type) && window.WorkbenchCanvasCommands?.graphCommand('canvas.group.add-member', 'classic')){
+                        group.items = Array.isArray(group.items) ? group.items : [];
+                        if(!group.items.includes(fromId)) group.items.push(fromId);
+                    }
                     syncLatestGeneratedOutputToConnection(fromId, toId);
                 }
                 syncGeneratorInputs();
@@ -15246,7 +15790,9 @@ function startLink(e, originId, originKind){
     };
 }
 function nearestPort(clientX, clientY, kind){
-    const selector = `.port.${kind}`;
+    const selector = kind === 'out'
+        ? '.port.out, .workbench-node-shell__port--output'
+        : '.port.in, .workbench-node-shell__port--input';
     const direct = document.elementFromPoint(clientX, clientY)?.closest(selector);
     if(direct) return direct;
     let best = null;
@@ -15287,6 +15833,7 @@ function canConnect(fromId, toId){
     const from = nodes.find(n => n.id === fromId);
     const to = nodes.find(n => n.id === toId);
     if(!from || !to) return false;
+    if(to.type === 'group') return ['image','prompt'].includes(from.type);
     if(CANVAS_GENERATOR_TYPES.includes(from.type)){
         if(to.type === 'output') return true;
         if(CANVAS_MEDIA_OUTPUT_TYPES.includes(from.type) && CANVAS_GENERATOR_TYPES.includes(to.type)){
@@ -15360,16 +15907,17 @@ function connectedClusterIds(seedId){
 }
 function canvasArrangeAtomicIds(ids){
     const out = new Set((ids || []).filter(id => nodes.some(n => n.id === id)));
+    const groups = nodes.filter(n => (n.type === 'group' || n.type === 'promptGroup') && Array.isArray(n.items));
+    const memberships = window.WorkbenchCanvasGroupMembership?.membershipIndex(groups);
     let changed = true;
     while(changed){
         changed = false;
-        nodes.filter(n => (n.type === 'group' || n.type === 'promptGroup') && Array.isArray(n.items)).forEach(group => {
-            (group.items || []).forEach(itemId => {
-                if(!out.has(itemId)) return;
-                out.delete(itemId);
-                out.add(group.id);
-                changed = true;
-            });
+        [...out].forEach(itemId => {
+            const groupId = memberships?.get(itemId) || groups.find(group => (group.items || []).includes(itemId))?.id;
+            if(!groupId || out.has(groupId)) return;
+            out.delete(itemId);
+            out.add(groupId);
+            changed = true;
         });
     }
     return [...out];
@@ -15527,16 +16075,23 @@ function portPoint(id, kind){
     const n = nodes.find(x => x.id === id);
     if(!n) return {x:0,y:0};  // 真正的孤儿连线（节点已删除）：renderLinks 会跳过它
     const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
-    const port = el?.querySelector(`.port.${kind}`);
+    const port = el?.querySelector(kind === 'out'
+        ? '.port.out, .workbench-node-shell__port--output'
+        : '.port.in, .workbench-node-shell__port--input');
     if(port){
         const r = port.getBoundingClientRect();
         return screenToWorld(r.left + r.width / 2, r.top + r.height / 2);
     }
     // 没有 DOM（节点渲染失败被跳过）或没找到端口时，用节点存储的几何坐标兜底，
     // 让连线仍画在节点附近，而不是落到 (0,0) 或干脆消失。
-    const w = (el?.offsetWidth) || n.w || 260, h = (el?.offsetHeight) || n.h || 160;
-    const nx = Number(n.x) || 0, ny = Number(n.y) || 0;
-    return kind === 'out' ? {x:nx + w, y:ny + h / 2} : {x:nx, y:ny + h / 2};
+    const size = defaultNodeSize(n.type);
+    const bounds = {x:Number(n.x) || 0, y:Number(n.y) || 0, width:(el?.offsetWidth) || n.w || size.w, height:(el?.offsetHeight) || n.h || size.h};
+    if(window.WorkbenchCanvasGraphGeometry){
+        return window.WorkbenchCanvasGraphGeometry.portAnchor(bounds, kind === 'out' ? 'right' : 'left');
+    }
+    return kind === 'out'
+        ? {x:bounds.x + bounds.width, y:bounds.y + bounds.height / 2}
+        : {x:bounds.x, y:bounds.y + bounds.height / 2};
 }
 function canResolvePort(id){
     // 只跳过“真正的孤儿连线”（端点节点已不存在）；节点存在但暂时没 DOM 的，portPoint 会用几何坐标兜底。
@@ -15819,14 +16374,14 @@ function startBoardPan(e, opts={}){
     document.body.classList.add('canvas-board-pan');
     window.onmousemove = e2 => {
         if(Math.hypot(e2.clientX - dragBoard.sx, e2.clientY - dragBoard.sy) > 4) dragBoard.moved = true;
-        viewport.x = dragBoard.ox + e2.clientX - dragBoard.sx;
-        viewport.y = dragBoard.oy + e2.clientY - dragBoard.sy;
+        const nextViewport = {x:dragBoard.ox + e2.clientX - dragBoard.sx, y:dragBoard.oy + e2.clientY - dragBoard.sy, scale:viewport.scale};
+        if(!applyCanvasRuntimeViewport({type:window.WorkbenchCanvasRuntime?.COMMANDS.VIEWPORT_SET, viewport:nextViewport})) viewport = nextViewport;
         applyViewport();
     };
     window.onmouseup = e2 => {
         const shouldClearSelection = dragBoard?.clearSelectionOnClick && !dragBoard.moved && selected.size;
         if(shouldClearSelection){
-            selected.clear();
+            if(!clearCanvasRuntimeSelection()) selected.clear();
             refreshSelectionVisuals();
         }
         endDrag(e2);
@@ -15889,11 +16444,17 @@ board.addEventListener('mousedown', e => {
 board.onwheel = e => {
     if(!canvas) return;
     e.preventDefault();
-    const before = screenToWorld(e.clientX, e.clientY);
-    viewport.scale = viewport.scale * (e.deltaY > 0 ? .92 : 1.08);
     const rect = board.getBoundingClientRect();
-    viewport.x = e.clientX - rect.left - before.x * viewport.scale;
-    viewport.y = e.clientY - rect.top - before.y * viewport.scale;
+    const nextScale = safeViewportScale(viewport.scale * (e.deltaY > 0 ? .92 : 1.08));
+    if(!applyCanvasRuntimeViewport({
+        type:window.WorkbenchCanvasRuntime?.COMMANDS.VIEWPORT_ZOOM_AT,
+        anchor:{x:e.clientX - rect.left, y:e.clientY - rect.top}, scale:nextScale,
+    })) {
+        const before = screenToWorld(e.clientX, e.clientY);
+        viewport.scale = nextScale;
+        viewport.x = e.clientX - rect.left - before.x * viewport.scale;
+        viewport.y = e.clientY - rect.top - before.y * viewport.scale;
+    }
     applyViewport();
     renderLinks();
     renderSelectionHub();

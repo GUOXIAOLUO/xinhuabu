@@ -1,0 +1,75 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+from fastapi import Request
+
+import main
+
+
+class RecordingSocket:
+    def __init__(self):
+        self.messages = []
+
+    async def send_text(self, message):
+        self.messages.append(message)
+
+
+class FailingSocket:
+    async def send_text(self, _message):
+        raise RuntimeError("closed")
+
+
+class EventContractTests(unittest.IsolatedAsyncioTestCase):
+    async def test_canvas_invalidation_message_has_stable_payload(self):
+        manager = main.ConnectionManager()
+        receiver = RecordingSocket()
+        failed = FailingSocket()
+        manager.active_connections = [receiver, failed]
+
+        with patch("builtins.print"):
+            await manager.broadcast_canvas_updated("canvas-1", 123, "client-1")
+
+        self.assertEqual(
+            json.loads(receiver.messages[0]),
+            {
+                "type": "canvas_updated",
+                "canvas_id": "canvas-1",
+                "updated_at": 123,
+                "client_id": "client-1",
+            },
+        )
+        self.assertEqual(manager.active_connections, [receiver])
+
+    async def test_chat_sse_emits_meta_delta_and_done_without_provider_network(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            request = Request(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": "/api/chat/stream",
+                    "headers": [],
+                    "client": ("127.0.0.1", 12345),
+                    "scheme": "http",
+                    "server": ("testserver", 80),
+                }
+            )
+            payload = main.ChatRequest(message="hello", provider="fixture-codex", model="fixture-model")
+            provider = {"id": "fixture-codex", "protocol": "codex", "chat_models": ["fixture-model"]}
+            with (
+                patch.object(main, "CONVERSATION_DIR", temp_dir),
+                patch.object(main, "get_api_provider", return_value=provider),
+                patch.object(main, "codex_chat_text", new=AsyncMock(return_value=("fixture reply", {"source": "test"}))),
+            ):
+                response = await main.chat_stream(payload, request, "fixture-user")
+                chunks = [chunk async for chunk in response.body_iterator]
+
+        self.assertEqual(response.media_type, "text/event-stream")
+        text_chunks = [chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk for chunk in chunks]
+        events = [json.loads(chunk[6:].strip()) for chunk in text_chunks]
+        self.assertEqual([event["type"] for event in events], ["meta", "delta", "done"])
+        self.assertEqual(events[1], {"type": "delta", "delta": "fixture reply"})
+        self.assertEqual(events[2]["message"]["content"], "fixture reply")
+        self.assertEqual(events[2]["conversation"]["messages"][0]["content"], "hello")

@@ -1,0 +1,22 @@
+{
+  "id": "fixture-smart-v0",
+  "title": "Smart legacy fixture",
+  "icon": "sparkles",
+  "kind": "smart",
+  "project": "fixture-project",
+  "created_at": 1700000000000,
+  "updated_at": 1700000000100,
+  "nodes": [
+    {"id": "smart-image-1", "type": "smart-image", "x": 20, "y": 30, "title": "Image", "images": [{"url": "/assets/input/reference.png", "name": "reference.png"}]},
+    {"id": "smart-prompt-1", "type": "smart-prompt", "x": 340, "y": 30, "title": "Prompt", "text": "fixture prompt"},
+    {"id": "smart-loop-1", "type": "smart-loop", "x": 660, "y": 30, "title": "Loop", "count": 2, "mode": "serial"},
+    {"id": "smart-minimax-1", "type": "smart-minimax", "x": 980, "y": 30, "title": "MiniMax", "clips": []},
+    {"id": "smart-group-1", "type": "smart-group", "x": 20, "y": 320, "title": "Group", "w": 520, "h": 280, "items": ["smart-image-1", "smart-prompt-1"]}
+  ],
+  "connections": [
+    {"id": "smart-connection-1", "from": "smart-image-1", "to": "smart-loop-1", "kind": "flow"}
+  ],
+  "viewport": {"x": 15, "y": 25, "scale": 1.1},
+  "logs": [],
+  "settings": {"mode": "image"}
+}

@@ -16,11 +16,11 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/lucide.js?v=2026.08.04.1785292594"></script>
-    <script src="/static/js/theme.js?v=2026.08.04.1785292593"></script>
-    <script src="/static/js/touch-mouse.js?v=2026.08.04.1785292587"></script>
-    <script src="/static/js/i18n.js?v=2026.08.04.1785292592"></script>
-    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.08.04.1785853706">
+    <script src="/static/vendor/js/lucide.js?v=2026.08.28.1787881168"></script>
+    <script src="/static/js/theme.js?v=2026.08.28.1787881168"></script>
+    <script src="/static/js/touch-mouse.js?v=2026.08.28.1787881168"></script>
+    <script src="/static/js/i18n.js?v=2026.08.28.1787881168"></script>
+    <link rel="stylesheet" href="/static/css/smart-canvas.css?v=2026.09.04.2">
 </head>
 <body>
     <div id="shell" class="shell">
@@ -64,37 +64,38 @@
         </div>
         <button class="smart-back" type="button" onclick="backToCanvasList()"><i data-lucide="arrow-left"></i><span data-i18n="canvas.backToList">返回画布列表</span></button>
         <div id="smartTitle" class="smart-title" data-i18n="smart.title">智能画布</div>
+        <aside id="smartNodeInspector" class="smart-node-inspector" aria-label="节点检查器" hidden></aside>
         <div id="createMenu" class="create-menu">
             <div class="create-menu-grid">
-                <button class="create-card" type="button" data-create-type="image">
+                <button class="create-card" type="button" data-canvas-command="canvas.create.image" data-create-type="image">
                     <span class="create-card-icon"><i data-lucide="upload-cloud"></i></span>
                     <span>
                         <div class="create-card-title">上传</div>
                         <div class="create-card-sub" data-i18n="smart.createImportNodeSub">图片、音频、视频都能导入</div>
                     </span>
                 </button>
-                <button class="create-card" type="button" data-create-type="group">
+                <button class="create-card" type="button" data-canvas-command="canvas.create.group" data-create-type="group">
                     <span class="create-card-icon"><i data-lucide="group"></i></span>
                     <span>
                         <div class="create-card-title">分组</div>
                         <div class="create-card-sub">把提示词、图片、循环收进同一组</div>
                     </span>
                 </button>
-                <button class="create-card" type="button" data-create-type="prompt">
+                <button class="create-card" type="button" data-canvas-command="canvas.create.prompt" data-create-type="prompt">
                     <span class="create-card-icon"><i data-lucide="text-cursor-input"></i></span>
                     <span>
                         <div class="create-card-title">提示词</div>
                         <div class="create-card-sub">手写或用 LLM 生成文本</div>
                     </span>
                 </button>
-                <button class="create-card" type="button" data-create-type="loop">
+                <button class="create-card" type="button" data-canvas-command="canvas.create.loop" data-create-type="loop">
                     <span class="create-card-icon"><i data-lucide="repeat-2"></i></span>
                     <span>
                         <div class="create-card-title">循环</div>
                         <div class="create-card-sub">控制运行轮数、批次和变量</div>
                     </span>
                 </button>
-                <button class="create-card" type="button" data-create-type="minimax">
+                <button class="create-card" type="button" data-canvas-command="canvas.create.minimax" data-create-type="minimax">
                     <span class="create-card-icon"><i data-lucide="clapperboard"></i></span>
                     <span>
                         <div class="create-card-title">MiniMax</div>
@@ -140,6 +141,7 @@
             <div id="promptTemplateBody" class="prompt-template-body"></div>
         </div>
         <button id="smartArrangeBtn" class="minimap-arrange-btn" type="button" title="整理选中节点" aria-label="整理选中节点"><i data-lucide="layout-grid"></i><span>整理选中</span></button>
+        <button id="smartViewportRecovery" class="smart-viewport-recovery" type="button" title="定位可见节点" aria-label="定位可见节点"><i data-lucide="locate-fixed"></i><span>定位节点</span></button>
         <div id="minimap" class="smart-minimap" aria-hidden="true">
             <div id="minimapContent" class="smart-minimap-content">
                 <div id="minimapViewport" class="smart-minimap-viewport"></div>
@@ -242,6 +244,7 @@
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>Alt</kbd><kbd>Shift</kbd></span><span data-i18n="smart.shortcutAltShiftCopy">复制节点并保留输入连线</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>A</kbd></span><span data-i18n="smart.shortcutAssets">打开/关闭资源库</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>Z</kbd></span><span data-i18n="smart.shortcutOverview">缩小画布视图</span></div>
+                    <div class="shortcut-item"><span class="shortcut-keys"><kbd>F</kbd></span><span>定位可见节点</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>双击</kbd></span><span data-i18n="smart.shortcutCreateMenu">打开快捷菜单</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>空白处</kbd></span><span data-i18n="smart.shortcutPan">拖动画布</span></div>
                     <div class="shortcut-item"><span class="shortcut-keys"><kbd>滚轮</kbd></span><span data-i18n="smart.shortcutZoom">缩放画布或预览图片</span></div>
@@ -444,6 +447,25 @@
         <div id="toast" class="toast"></div>
         <div id="mentionPreview" class="mention-preview"><img alt="preview"></div>
     </div>
-    <script src="/static/js/smart-canvas.js?v=2026.08.04.1787122358"></script>
+    <script src="/static/js/workbench/canvas/records.js?v=2026.08.28.1788439786"></script>
+    <script src="/static/js/workbench/canvas/node-inspector.js?v=2026.08.28.1788441997"></script>
+    <script src="/static/js/workbench/canvas/node-creation-client.js?v=2026.08.28.1788359281"></script>
+    <script src="/static/js/workbench/canvas/creation-catalog.js?v=2026.09.04.1"></script>
+    <script src="/static/js/workbench/canvas/generation-intent.js?v=2026.09.04.1"></script>
+    <script src="/static/js/workbench/canvas/command-registry.js?v=2026.09.04.5"></script>
+    <script src="/static/js/workbench/canvas/runtime-state.js?v=2026.09.04.1"></script>
+    <script src="/static/js/workbench/canvas/graph-geometry.js?v=2026.09.04.1"></script>
+    <script src="/static/js/workbench/canvas/graph-interaction.js?v=2026.09.04.1"></script>
+    <script src="/static/js/workbench/canvas/group-membership.js?v=2026.09.04.1"></script>
+    <script src="/static/js/workbench/canvas/viewport-recovery.js?v=2026.09.04.1"></script>
+    <script src="/static/js/workbench/canvas/renderer-registry.js?v=2026.09.04.1"></script>
+    <script src="/static/js/workbench/canvas/node-shell.js?v=2026.09.04.2"></script>
+    <script src="/static/js/workbench/canvas/legacy-renderer.js?v=2026.08.28.1788438695"></script>
+    <script src="/static/js/workbench/canvas/media-renderer.js?v=2026.08.28.1788438695"></script>
+    <script src="/static/js/workbench/canvas/node-card-host.js?v=2026.09.04.3"></script>
+    <script src="/static/js/workbench/canvas/unified-render-host.js?v=2026.09.04.11"></script>
+    <script src="/static/js/workbench/canvas/semantic-zoom.js?v=2026.08.28.1788370356"></script>
+    <script src="/static/js/workbench/canvas/screen-space-controls.js?v=2026.08.28.1788362721"></script>
+    <script src="/static/js/smart-canvas.js?v=2026.09.04.9"></script>
 </body>
 </html>

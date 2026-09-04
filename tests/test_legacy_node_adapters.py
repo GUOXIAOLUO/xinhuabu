@@ -1,0 +1,184 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from threading import Lock
+
+from workbench.application.legacy_definitions import LegacyDefinitionRegistry
+from workbench.application.node_creation import NodeCreationService
+from workbench.application.node_mutation import NodeDeleteCommand, NodeMutationService, NodeUpdateCommand
+from workbench.domain.canvas.models import ModelBinding, Position
+from workbench.repositories.jsonl_audit_sink import JsonlAuditSink
+from workbench.repositories.legacy_json_canvas_repository import LegacyJsonCanvasRepository
+from workbench.repositories.legacy_json_node_repository import (
+    LegacyCanvasProjectAuthorizer,
+    LegacyJsonNodeCreationRepository,
+    LegacyJsonNodeLookup,
+    LegacyJsonNodeMutationRepository,
+)
+from workbench.application.node_creation import NodeCreateCommand, NodeCreationSource
+
+
+class CompatibleNoModel:
+    def is_compatible(self, definition, binding):
+        return False
+
+
+class LegacyNodeAdaptersTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.lock = Lock()
+        self.clock = 100
+        self.canvas_repository = LegacyJsonCanvasRepository(self.root / "canvases", clock_ms=lambda: self.clock, lock=self.lock)
+        self.canvas_repository.save({
+            "id": "canvas-1", "project": "project-1", "owner": "user-1", "nodes": [], "connections": [], "updated_at": 99,
+        })
+        self.authorizer = LegacyCanvasProjectAuthorizer(self.canvas_repository)
+        self.node_repository = LegacyJsonNodeCreationRepository(self.canvas_repository)
+        self.audit_path = self.root / "audit" / "events.jsonl"
+        self.service = NodeCreationService(
+            authorizer=self.authorizer,
+            definitions=LegacyDefinitionRegistry(),
+            model_policy=CompatibleNoModel(),
+            repository=self.node_repository,
+            audit_sink=JsonlAuditSink(self.audit_path, lock=Lock()),
+            node_id_factory=lambda: "created-image-1",
+        )
+        self.mutations = NodeMutationService(
+            authorizer=self.authorizer,
+            repository=LegacyJsonNodeMutationRepository(self.canvas_repository),
+            audit_sink=JsonlAuditSink(self.audit_path, lock=Lock()),
+        )
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def command(self, **overrides):
+        values = {
+            "request_id": "request-1", "actor_id": "user-1", "project_id": "project-1", "canvas_id": "canvas-1",
+            "source": NodeCreationSource.LEGACY, "definition_ref": LegacyDefinitionRegistry.IMAGE, "position": Position(x=20, y=30),
+            "expected_revision": 100,
+        }
+        values.update(overrides)
+        return NodeCreateCommand(**values)
+
+    def test_creates_one_legacy_image_with_persistent_idempotency_and_audit(self):
+        first = self.service.create(self.command())
+        second = self.service.create(self.command())
+        canvas = self.canvas_repository.load("canvas-1")
+        self.assertTrue(first.created)
+        self.assertFalse(second.created)
+        self.assertEqual(len(canvas["nodes"]), 1)
+        self.assertEqual(canvas["nodes"][0]["type"], "image")
+        self.assertEqual(canvas["nodes"][0]["_workbench_node_create_request_id"], "request-1")
+        self.assertEqual(first.node.kind, "asset")
+        self.assertEqual(second.node.kind, "asset")
+        events = [json.loads(line) for line in self.audit_path.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(len(events), 1)
+        self.assertNotIn("config", events[0])
+
+    def test_lookup_enforces_project_and_owner_scope(self):
+        self.service.create(self.command())
+        lookup = LegacyJsonNodeLookup(self.canvas_repository, self.authorizer)
+        record = lookup.get(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="created-image-1")
+        self.assertEqual(record.definition_ref.id, "image")
+        with self.assertRaises(LookupError):
+            lookup.get(actor_id="other", project_id="project-1", canvas_id="canvas-1", node_id="created-image-1")
+
+    def test_creates_approved_legacy_prompt_with_its_text_config(self):
+        result = self.service.create(self.command(
+            request_id="prompt-request", definition_ref=LegacyDefinitionRegistry.PROMPT,
+            initial_config={"text": ""},
+        ))
+        canvas = self.canvas_repository.load("canvas-1")
+        self.assertTrue(result.created)
+        self.assertEqual(canvas["nodes"][0]["type"], "prompt")
+        self.assertEqual(canvas["nodes"][0]["text"], "")
+
+    def test_creates_smart_prompt_with_only_whitelisted_initial_config(self):
+        self.service.create(self.command(request_id="smart-prompt-request", definition_ref=LegacyDefinitionRegistry.SMART_PROMPT, initial_config={"text": "", "promptResult": "generated", "promptResultOutdated": True, "llmProvider": "provider", "llmModel": "model", "promptSkillPack": "MiniMax H3 Skills", "promptSkillDefinition": "3D动画短片生成器", "secret": "must-not-persist"}))
+        node = self.canvas_repository.load("canvas-1")["nodes"][0]
+        self.assertEqual(node["type"], "smart-prompt")
+        self.assertEqual(node["llmProvider"], "provider")
+        self.assertEqual(node["promptSkillPack"], "MiniMax H3 Skills")
+        self.assertEqual(node["promptSkillDefinition"], "3D动画短片生成器")
+        self.assertEqual(node["promptResult"], "generated")
+        self.assertTrue(node["promptResultOutdated"])
+        self.assertNotIn("secret", node)
+
+    def test_creates_smart_loop_with_its_safe_defaults(self):
+        self.service.create(self.command(request_id="smart-loop-request", definition_ref=LegacyDefinitionRegistry.SMART_LOOP))
+        node = self.canvas_repository.load("canvas-1")["nodes"][0]
+        self.assertEqual(node["type"], "smart-loop")
+        self.assertEqual((node["count"], node["mode"]), (1, "serial"))
+
+    def test_creates_empty_smart_group_with_its_safe_defaults(self):
+        result = self.service.create(self.command(
+            request_id="smart-group-request", definition_ref=LegacyDefinitionRegistry.SMART_GROUP,
+        ))
+        node = self.canvas_repository.load("canvas-1")["nodes"][0]
+        self.assertTrue(result.created)
+        self.assertEqual(result.node.kind, "group")
+        self.assertEqual((node["type"], node["title"], node["w"], node["h"], node["items"]), (
+            "smart-group", "智能分组", 340, 286, [],
+        ))
+
+    def test_creates_empty_smart_minimax_with_safe_defaults(self):
+        result = self.service.create(self.command(
+            request_id="smart-minimax-request", definition_ref=LegacyDefinitionRegistry.SMART_MINIMAX,
+        ))
+        node = self.canvas_repository.load("canvas-1")["nodes"][0]
+        self.assertTrue(result.created)
+        self.assertEqual((node["type"], node["workflow"], node["minimaxEngine"]), (
+            "smart-minimax", "MiniMax_H3.json", "comfyui",
+        ))
+        self.assertFalse(node["running"])
+
+    def test_creates_empty_classic_group_with_its_safe_defaults(self):
+        result = self.service.create(self.command(
+            request_id="group-request", definition_ref=LegacyDefinitionRegistry.GROUP,
+        ))
+        node = self.canvas_repository.load("canvas-1")["nodes"][0]
+        self.assertTrue(result.created)
+        self.assertEqual(result.node.kind, "group")
+        self.assertEqual((node["type"], node["title"], node["w"], node["h"], node["items"]), (
+            "group", "Group", 300, 220, [],
+        ))
+
+    def test_creates_approved_legacy_loop_with_safe_defaults(self):
+        self.service.create(self.command(request_id="loop-request", definition_ref=LegacyDefinitionRegistry.LOOP, initial_config={"count": 3}))
+        node = self.canvas_repository.load("canvas-1")["nodes"][0]
+        self.assertEqual(node["type"], "loop")
+        self.assertEqual(node["count"], 3)
+        self.assertFalse(node["showPrompt"])
+
+    def test_unowned_can_be_explicitly_limited_to_local_policy(self):
+        self.canvas_repository.save({"id": "unowned", "project": "project-1", "owner": "", "nodes": [], "updated_at": 100})
+        strict = LegacyCanvasProjectAuthorizer(self.canvas_repository)
+        local = LegacyCanvasProjectAuthorizer(self.canvas_repository, allow_unowned_local=True)
+        self.assertFalse(strict.can_edit("user-1", "project-1", "unowned"))
+        self.assertTrue(local.can_edit("user-1", "project-1", "unowned"))
+
+    def test_update_and_delete_image_removes_connected_edges_and_audits(self):
+        self.service.create(self.command())
+        before = self.canvas_repository.load("canvas-1")
+        self.canvas_repository.mutate_if_current("canvas-1", expected_updated_at=before["updated_at"], mutation=lambda canvas: canvas.update({
+            "connections": [{"from": "created-image-1", "to": "other"}, {"from": "other", "to": "created-image-1"}],
+        }))
+        revision = self.canvas_repository.load("canvas-1")["updated_at"]
+        updated = self.mutations.update(NodeUpdateCommand(
+            actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="created-image-1",
+            expected_revision=revision, title="Renamed", position=Position(x=44, y=55),
+        ))
+        self.assertEqual(updated.node.title, "Renamed")
+        deleted = self.mutations.delete(NodeDeleteCommand(
+            actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="created-image-1",
+            expected_revision=updated.canvas_revision,
+        ))
+        canvas = self.canvas_repository.load("canvas-1")
+        self.assertEqual(deleted.canvas_revision, canvas["updated_at"])
+        self.assertEqual(canvas["nodes"], [])
+        self.assertEqual(canvas["connections"], [])
+        events = [json.loads(line) for line in self.audit_path.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([event["event"] for event in events], ["canvas.node.created", "canvas.node.updated", "canvas.node.deleted"])

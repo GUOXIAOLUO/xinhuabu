@@ -38,6 +38,26 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
+from workbench.repositories.canvas_repository import (
+    CanvasDeletedError,
+    CanvasNotFoundError,
+    CanvasValidationError,
+    StaleCanvasRevisionError,
+)
+from workbench.repositories.legacy_json_canvas_repository import LegacyJsonCanvasRepository
+from workbench.api.canvas_nodes import create_canvas_nodes_router
+from workbench.application.legacy_definitions import LegacyDefinitionRegistry, LegacyImageModelCompatibilityPolicy
+from workbench.application.node_creation import NodeCreationService
+from workbench.application.node_mutation import NodeMutationService
+from workbench.application.graph_mutation import GraphMutationService
+from workbench.repositories.jsonl_audit_sink import JsonlAuditSink
+from workbench.repositories.legacy_json_node_repository import (
+    LegacyCanvasProjectAuthorizer,
+    LegacyJsonNodeCreationRepository,
+    LegacyJsonNodeLookup,
+    LegacyJsonNodeMutationRepository,
+    LegacyJsonGraphMutationRepository,
+)
 
 QUIET_ACCESS_PATHS = {
     "/api/queue_status",
@@ -68,11 +88,57 @@ logging.getLogger("uvicorn.access").addFilter(QuietAccessLogFilter())
 
 app = FastAPI()
 
+
+def _workbench_port() -> int:
+    """Return the explicitly configured HTTP port with bounded validation."""
+    raw_port = os.getenv("WORKBENCH_PORT", "3000")
+    try:
+        port = int(raw_port)
+    except ValueError as exc:
+        raise RuntimeError("WORKBENCH_PORT must be an integer between 1 and 65535") from exc
+    if not 1 <= port <= 65535:
+        raise RuntimeError("WORKBENCH_PORT must be an integer between 1 and 65535")
+    return port
+
+
+def parse_allowed_origins(raw_origins: str | None, port: int) -> list[str]:
+    """Parse a deliberate CORS allowlist; wildcard origins are never accepted."""
+    if raw_origins is None or not raw_origins.strip():
+        return [
+            f"http://127.0.0.1:{port}",
+            f"http://localhost:{port}",
+            f"http://[::1]:{port}",
+        ]
+
+    origins = [origin.strip().rstrip("/") for origin in raw_origins.split(",") if origin.strip()]
+    if not origins:
+        raise RuntimeError("WORKBENCH_ALLOWED_ORIGINS must contain at least one origin")
+    if "*" in origins:
+        raise RuntimeError("WORKBENCH_ALLOWED_ORIGINS must not contain wildcard origins")
+    return origins
+
+
+WORKBENCH_HOST = (os.getenv("WORKBENCH_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+WORKBENCH_PORT = _workbench_port()
+WORKBENCH_ALLOWED_ORIGINS = parse_allowed_origins(
+    os.getenv("WORKBENCH_ALLOWED_ORIGINS"), WORKBENCH_PORT
+)
+WORKBENCH_LAN_ENABLED = WORKBENCH_HOST in {"0.0.0.0", "::"}
+
+
+def node_api_is_enabled_for_host(host: str) -> bool:
+    """The transitional header-based node API is intentionally localhost-only."""
+    return host.strip().lower() in {"127.0.0.1", "::1", "localhost"}
+
+
+WORKBENCH_NODE_API_ENABLED = node_api_is_enabled_for_host(WORKBENCH_HOST)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=WORKBENCH_ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Range", "X-User-ID"],
+    allow_credentials=False,
 )
 
 # --- WebSocket 状态管理器 ---
@@ -302,6 +368,8 @@ HISTORY_LOCK = Lock()
 GLOBAL_CONFIG_LOCK = Lock()
 CONVERSATION_LOCK = Lock()
 CANVAS_LOCK = Lock()
+CANVAS_NODE_AUDIT_LOCK = Lock()
+CANVAS_NODE_AUDIT_PATH = os.path.join(DATA_DIR, "audit", "canvas-node-events.jsonl")
 LOAD_LOCK = Lock()
 RUNNINGHUB_WORKFLOW_LOCK = Lock()
 NEXT_TASK_ID = 1
@@ -770,6 +838,37 @@ def mask_secret(value):
         return ""
     tail = value[-4:] if len(value) > 4 else value
     return f"••••••••{tail}"
+
+
+SENSITIVE_VALUE_FIELD_RE = re.compile(
+    r"(?i)(api[_-]?key|access[_-]?key|secret(?:[_-]?key)?|token|authorization|password)"
+)
+SENSITIVE_QUERY_VALUE_RE = re.compile(
+    r"(?i)([?&](?:api[_-]?key|access[_-]?key|secret(?:[_-]?key)?|token|authorization|password)=)([^&#\s]+)"
+)
+SENSITIVE_INLINE_VALUE_RE = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?key|secret(?:[_-]?key)?|token|authorization|password)\b\s*[:=]\s*)([^\s,;&]+)"
+)
+BEARER_VALUE_RE = re.compile(r"(?i)(\bBearer\s+)(\S+)")
+URL_USERINFO_RE = re.compile(r"://[^/@\s]+@")
+
+
+def redact_sensitive_value(value):
+    """Return a log-safe copy without provider credentials or URI userinfo."""
+    if isinstance(value, dict):
+        return {
+            key: "[REDACTED]" if SENSITIVE_VALUE_FIELD_RE.search(str(key)) else redact_sensitive_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_sensitive_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact_sensitive_value(item) for item in value)
+    text = str(value or "")
+    text = URL_USERINFO_RE.sub("://[REDACTED]@", text)
+    text = SENSITIVE_QUERY_VALUE_RE.sub(r"\1[REDACTED]", text)
+    text = BEARER_VALUE_RE.sub(r"\1[REDACTED]", text)
+    return SENSITIVE_INLINE_VALUE_RE.sub(r"\1[REDACTED]", text)
 
 def strip_auth_scheme(value, scheme="Bearer"):
     text = str(value or "").strip()
@@ -1870,6 +1969,12 @@ def app_info():
             },
         },
         "update_notes": read_local_update_notes(version),
+        "server": {
+            "host": WORKBENCH_HOST,
+            "port": WORKBENCH_PORT,
+            "exposure_mode": "lan_opt_in" if WORKBENCH_LAN_ENABLED else "local_only",
+            "allowed_origins": WORKBENCH_ALLOWED_ORIGINS,
+        },
     }
 
 def connectivity_probe(name: str, url: str, timeout: float = 5.0) -> Dict[str, Any]:
@@ -2768,6 +2873,8 @@ class TokenRequest(BaseModel):
 
 class CloudGenRequest(BaseModel):
     prompt: str
+    # Retained only to accept Legacy clients during Phase 0. The backend ignores
+    # it so browser clients cannot override or transport provider credentials.
     api_key: str = ""
     model: str = ""
     resolution: str = "1024x1024"
@@ -2778,6 +2885,7 @@ class CloudGenRequest(BaseModel):
 
 class CloudPollRequest(BaseModel):
     task_id: str
+    # Retained only for Legacy request compatibility; never used for auth.
     api_key: str = ""
     client_id: Optional[str] = None
 
@@ -2975,6 +3083,7 @@ def chat_system_prompt(payload):
 
 class MsGenerateRequest(BaseModel):
     prompt: str
+    # Retained only for Legacy request compatibility; never used for auth.
     api_key: str = ""
     model: str = "black-forest-labs/FLUX.2-klein-9B"
     image_urls: List[str] = []
@@ -3032,6 +3141,13 @@ class CanvasSaveRequest(BaseModel):
     settings: Dict[str, Any] = {}
     client_id: str = ""
     base_updated_at: int = 0
+
+class DeleteCanvasLogRequest(BaseModel):
+    log_id: str
+    delete_unreferenced_media: bool = False
+    reset_referencing_nodes: bool = False
+    base_updated_at: int = 0
+    client_id: str = ""
 
 class CanvasAssetCheckRequest(BaseModel):
     urls: List[str] = []
@@ -3573,11 +3689,208 @@ def canvas_path(canvas_id):
         raise HTTPException(status_code=400, detail="无效的画布 ID")
     return os.path.join(CANVAS_DIR, f"{cleaned}.json")
 
+def canvas_repository():
+    """Return the compatibility repository backed by the current Canvas JSON directory."""
+    return LegacyJsonCanvasRepository(CANVAS_DIR, clock_ms=now_ms, lock=CANVAS_LOCK)
+
+def local_node_creation_service(actor_id: str) -> NodeCreationService:
+    """Build the explicitly localhost-only service for the first Legacy Image API."""
+    repository = canvas_repository()
+    authorizer = LegacyCanvasProjectAuthorizer(repository, allow_unowned_local=True)
+    return NodeCreationService(
+        authorizer=authorizer,
+        definitions=LegacyDefinitionRegistry(),
+        model_policy=LegacyImageModelCompatibilityPolicy(),
+        repository=LegacyJsonNodeCreationRepository(repository),
+        audit_sink=JsonlAuditSink(CANVAS_NODE_AUDIT_PATH, lock=CANVAS_NODE_AUDIT_LOCK),
+        node_id_factory=lambda: uuid.uuid4().hex,
+    )
+
+def local_node_lookup() -> LegacyJsonNodeLookup:
+    repository = canvas_repository()
+    return LegacyJsonNodeLookup(
+        repository,
+        LegacyCanvasProjectAuthorizer(repository, allow_unowned_local=True),
+    )
+
+def local_node_mutation_service(actor_id: str) -> NodeMutationService:
+    repository = canvas_repository()
+    return NodeMutationService(
+        authorizer=LegacyCanvasProjectAuthorizer(repository, allow_unowned_local=True),
+        repository=LegacyJsonNodeMutationRepository(repository),
+        audit_sink=JsonlAuditSink(CANVAS_NODE_AUDIT_PATH, lock=CANVAS_NODE_AUDIT_LOCK),
+    )
+
+def local_graph_mutation_service(actor_id: str) -> GraphMutationService:
+    repository = canvas_repository()
+    return GraphMutationService(
+        authorizer=LegacyCanvasProjectAuthorizer(repository, allow_unowned_local=True),
+        repository=LegacyJsonGraphMutationRepository(repository),
+        audit_sink=JsonlAuditSink(CANVAS_NODE_AUDIT_PATH, lock=CANVAS_NODE_AUDIT_LOCK),
+    )
+
 def save_canvas(canvas):
-    canvas["updated_at"] = now_ms()
-    with CANVAS_LOCK:
-        with open(canvas_path(canvas["id"]), 'w', encoding='utf-8') as f:
-            json.dump(canvas, f, ensure_ascii=False, indent=2)
+    try:
+        canvas_repository().save(canvas)
+    except CanvasValidationError:
+        raise HTTPException(status_code=400, detail="无效的画布 ID")
+
+def collect_local_media_urls(value):
+    """Collect generated local-media URLs from nested Canvas payloads."""
+    collected = []
+    seen = set()
+
+    def _visit(item):
+        if isinstance(item, str):
+            text = item.strip()
+            path = text.split("?", 1)[0].split("#", 1)[0]
+            if path.startswith(("/assets/output/", "/output/")) and text not in seen:
+                seen.add(text)
+                collected.append(text)
+            return
+        if isinstance(item, dict):
+            for nested in item.values():
+                _visit(nested)
+            return
+        if isinstance(item, (list, tuple)):
+            for nested in item:
+                _visit(nested)
+
+    _visit(value)
+    return collected
+
+def generated_media_path_from_url(url):
+    """Resolve only files exposed by the generated-output mounts."""
+    text = str(url or "").strip()
+    clean = urllib.parse.unquote(text.split("?", 1)[0].split("#", 1)[0])
+    mounts = (("/assets/output/", OUTPUT_OUTPUT_DIR), ("/output/", OUTPUT_DIR))
+    for prefix, root in mounts:
+        if not clean.startswith(prefix):
+            continue
+        relative = clean[len(prefix):].lstrip("/")
+        if not relative:
+            return None
+        root_path = os.path.realpath(root)
+        candidate = os.path.realpath(os.path.join(root_path, *relative.split("/")))
+        try:
+            if os.path.commonpath([root_path, candidate]) != root_path:
+                return None
+        except ValueError:
+            return None
+        return candidate
+    return None
+
+def _canvas_node_owned_media_urls(node):
+    if not isinstance(node, dict):
+        return []
+    owned = []
+    node_type = str(node.get("type") or "").strip().lower()
+    owned.extend(collect_local_media_urls(node.get("generatedOutputs") or []))
+    if node_type == "smart-image":
+        for image in node.get("images") or []:
+            if isinstance(image, dict) and image.get("loopInputPreview") is True:
+                continue
+            owned.extend(collect_local_media_urls(image))
+    elif node_type == "output":
+        for key in ("images", "_pending", "imageComparisons"):
+            owned.extend(collect_local_media_urls(node.get(key)))
+    return list(dict.fromkeys(owned))
+
+def _reset_canvas_result_node(node):
+    node_type = str(node.get("type") or "").strip().lower()
+    removed_urls = _canvas_node_owned_media_urls(node)
+    if "generatedOutputs" in node:
+        node["generatedOutputs"] = []
+    if node_type == "smart-image":
+        node["images"] = [
+            item for item in (node.get("images") or [])
+            if isinstance(item, dict) and item.get("loopInputPreview") is True
+        ]
+        node["pending"] = 0
+        node["running"] = False
+        node.pop("runFinishedAt", None)
+    elif node_type == "output":
+        node["images"] = []
+        node["_pending"] = []
+        node["imageComparisons"] = {}
+    return removed_urls
+
+def _canvas_media_reference_paths(canvas):
+    paths = set()
+    for url in collect_local_media_urls(canvas):
+        path = generated_media_path_from_url(url)
+        if path:
+            paths.add(path)
+    return paths
+
+def _other_canvas_media_reference_paths(current_canvas):
+    referenced = set()
+    unreadable = False
+    current_id = str(current_canvas.get("id") or "")
+    try:
+        filenames = os.listdir(CANVAS_DIR)
+    except OSError:
+        return referenced, True
+    for filename in filenames:
+        if not filename.endswith(".json"):
+            continue
+        try:
+            if filename == f"{current_id}.json":
+                canvas = current_canvas
+            else:
+                with open(os.path.join(CANVAS_DIR, filename), "r", encoding="utf-8") as f:
+                    canvas = json.load(f)
+            referenced.update(_canvas_media_reference_paths(canvas))
+        except Exception:
+            # A partially written Canvas may still own a file. Preserve candidates
+            # instead of risking destructive cleanup while ownership is unknown.
+            unreadable = True
+    return referenced, unreadable
+
+def _remove_media_preview_cache(path):
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return 0
+    removed = 0
+    absolute = os.path.realpath(path)
+    for width in range(64, 2049):
+        key = hashlib.sha1(
+            f"{absolute}|{stat.st_mtime_ns}|{stat.st_size}|{width}".encode("utf-8", "ignore")
+        ).hexdigest()
+        for extension in ("webp", "png"):
+            preview_path = os.path.join(MEDIA_PREVIEW_DIR, f"{key}.{extension}")
+            try:
+                os.remove(preview_path)
+                removed += 1
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+    return removed
+
+def _remove_deleted_media_from_history(removed_paths):
+    if not removed_paths or not os.path.exists(HISTORY_FILE):
+        return
+    with HISTORY_LOCK:
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                history = json.load(f)
+        except Exception:
+            return
+        if not isinstance(history, list):
+            return
+        kept = []
+        for record in history:
+            record_paths = {
+                path for path in (generated_media_path_from_url(url) for url in collect_local_media_urls(record))
+                if path
+            }
+            if record_paths.isdisjoint(removed_paths):
+                kept.append(record)
+        if len(kept) != len(history):
+            with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+                json.dump(kept, f, ensure_ascii=False, indent=4)
 
 def normalize_canvas_kind(kind="classic"):
     return "smart" if str(kind or "").strip().lower() == "smart" else "classic"
@@ -3672,21 +3985,22 @@ def new_canvas(title="未命名画布", icon="layers", kind="classic", project=N
     return canvas
 
 def load_canvas(canvas_id):
-    path = canvas_path(canvas_id)
-    if not os.path.exists(path):
+    try:
+        return canvas_repository().load(canvas_id)
+    except CanvasValidationError:
+        raise HTTPException(status_code=400, detail="无效的画布 ID")
+    except CanvasNotFoundError:
         raise HTTPException(status_code=404, detail="画布不存在")
-    with open(path, 'r', encoding='utf-8') as f:
-        canvas = json.load(f)
-    if canvas.get("deleted_at"):
+    except CanvasDeletedError:
         raise HTTPException(status_code=404, detail="画布已在回收站")
-    return canvas
 
 def load_canvas_any(canvas_id):
-    path = canvas_path(canvas_id)
-    if not os.path.exists(path):
+    try:
+        return canvas_repository().load(canvas_id, include_deleted=True)
+    except CanvasValidationError:
+        raise HTTPException(status_code=400, detail="无效的画布 ID")
+    except CanvasNotFoundError:
         raise HTTPException(status_code=404, detail="画布不存在")
-    with open(path, 'r', encoding='utf-8') as f:
-        return json.load(f)
 
 CANVAS_COLORS = {"", "red", "orange", "amber", "green", "teal", "blue", "violet", "pink", "slate"}
 
@@ -3947,7 +4261,9 @@ def log_net_error(context, exc, url=""):
         cur = exc
         seen = 0
         while cur is not None and seen < 6:
-            chain.append(f"{type(cur).__module__}.{type(cur).__name__}: {str(cur)[:200]}")
+            chain.append(
+                f"{type(cur).__module__}.{type(cur).__name__}: {redact_sensitive_value(str(cur)[:200])}"
+            )
             nxt = getattr(cur, "__cause__", None) or getattr(cur, "__context__", None)
             if nxt is cur:
                 break
@@ -3961,10 +4277,18 @@ def log_net_error(context, exc, url=""):
             proxies = urllib.request.getproxies() or "无"
         except Exception:
             proxies = "?"
-        print(f"[NET-ERR] {context} | url={url or '?'} | sys_proxy={proxies} | " + " <- ".join(chain), flush=True)
+        print(
+            f"[NET-ERR] {redact_sensitive_value(context)} | url={redact_sensitive_value(url or '?')} | "
+            f"sys_proxy={redact_sensitive_value(proxies)} | " + " <- ".join(chain),
+            flush=True,
+        )
     except Exception:
         try:
-            print(f"[NET-ERR] {context} | {type(exc).__name__}: {exc}", flush=True)
+            print(
+                f"[NET-ERR] {redact_sensitive_value(context)} | {type(exc).__name__}: "
+                f"{redact_sensitive_value(exc)}",
+                flush=True,
+            )
         except Exception:
             pass
 
@@ -6820,7 +7144,11 @@ async def httpx_request_with_transient_retries(client, method, url, attempts=2, 
             last_exc = exc
             if attempt + 1 >= attempts:
                 raise
-            print(f"[HTTPX-RETRY] {method} {url} transient error: {exc}; retry {attempt + 2}/{attempts}", flush=True)
+            print(
+                f"[HTTPX-RETRY] {method} {redact_sensitive_value(url)} transient error: "
+                f"{redact_sensitive_value(exc)}; retry {attempt + 2}/{attempts}",
+                flush=True,
+            )
             await asyncio.sleep(retry_delay * (attempt + 1))
     if last_exc:
         raise last_exc
@@ -6899,12 +7227,12 @@ def storage_kind_dir(kind):
     raise HTTPException(status_code=404, detail="未知存储目录")
 
 def storage_file_path(kind, rel):
-    root = storage_kind_dir(kind)
+    root = os.path.realpath(storage_kind_dir(kind))
     rel_path = str(rel or "").replace("\\", "/").lstrip("/")
     rel_path = os.path.normpath(rel_path).replace("\\", "/")
     if not rel_path or rel_path == "." or rel_path == ".." or rel_path.startswith("../") or os.path.isabs(rel_path):
         raise HTTPException(status_code=400, detail="非法文件路径")
-    path = os.path.abspath(os.path.join(root, rel_path))
+    path = os.path.realpath(os.path.join(root, rel_path))
     try:
         if os.path.commonpath([root, path]) != root:
             raise HTTPException(status_code=400, detail="非法文件路径")
@@ -6934,8 +7262,8 @@ def output_file_from_url(url):
         return None
     roots = [ASSETS_DIR] if clean.startswith("/assets/") else [OUTPUT_OUTPUT_DIR, OUTPUT_DIR]
     for root in roots:
-        path = os.path.abspath(os.path.join(root, rel))
-        output_root = os.path.abspath(root)
+        output_root = os.path.realpath(root)
+        path = os.path.realpath(os.path.join(output_root, rel))
         if os.path.commonpath([output_root, path]) == output_root and os.path.exists(path):
             return path
     return None
@@ -7056,7 +7384,7 @@ async def update_asset_classification_prompt(payload: Dict[str, str]):
 def media_preview_cache_paths(path: str, width: int):
     stat = os.stat(path)
     key = hashlib.sha1(
-        f"{os.path.abspath(path)}|{stat.st_mtime_ns}|{stat.st_size}|{width}".encode("utf-8", "ignore")
+        f"{os.path.realpath(path)}|{stat.st_mtime_ns}|{stat.st_size}|{width}".encode("utf-8", "ignore")
     ).hexdigest()
     return (
         os.path.join(MEDIA_PREVIEW_DIR, f"{key}.webp"),
@@ -10153,7 +10481,7 @@ def log_runninghub_error(stage, raw=None, **extra):
         payload = {"stage": stage, **{k: v for k, v in extra.items() if v not in (None, "")}}
         if raw is not None:
             payload["raw"] = raw
-        print(f"RunningHub error: {json.dumps(payload, ensure_ascii=False)[:4000]}")
+        print(f"RunningHub error: {json.dumps(redact_sensitive_value(payload), ensure_ascii=False)[:4000]}")
     except Exception:
         print(f"RunningHub error: {stage}")
 
@@ -13289,22 +13617,17 @@ async def save_providers(payload: List[ApiProviderPayload]):
         reload_env_globals()   # 立即将最新 env 值同步回模块全局变量，无需重启
     return {"providers": [public_provider(p) for p in providers]}
 
-# --- ModelScope Token (从 env 读取，不再支持通过 UI 修改) ---
+# --- ModelScope configuration metadata (secret remains server-side) ---
 
 @app.get("/api/config/token")
 async def get_global_token():
-    # 优先读 env，回退到 global_config.json（兼容旧数据）
-    saved_token = modelscope_api_key()
-    if saved_token:
-        return {"token": saved_token}
-    if os.path.exists(GLOBAL_CONFIG_FILE):
-        try:
-            with open(GLOBAL_CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                return {"token": config.get("modelscope_token", "")}
-        except:
-            pass
-    return {"token": ""}
+    """Legacy route returning non-sensitive ModelScope configuration state.
+
+    Earlier browser pages read a raw token from this route. Keep the path during
+    Phase 0 so old callers receive an explicit capability result rather than a
+    secret, then remove it after the compatibility window.
+    """
+    return {"configured": bool(modelscope_api_key())}
 
 # --- 在线生图 (COMFLY) ---
 
@@ -16184,8 +16507,8 @@ async def get_canvas(canvas_id: str):
 
 @app.post("/api/canvases/{canvas_id}/touch")
 async def touch_canvas(canvas_id: str):
+    """Compatibility route for older clients; opening a Canvas is read-only."""
     canvas = load_canvas(canvas_id)
-    save_canvas(canvas)
     return {"canvas": canvas_record(canvas), "updated_at": canvas.get("updated_at", 0)}
 
 @app.get("/api/canvas-assets")
@@ -17305,9 +17628,100 @@ async def update_canvas(canvas_id: str, payload: CanvasSaveRequest):
         canvas["viewport"] = canvas.get("viewport") or {"x": 0, "y": 0, "scale": 1}
     canvas["logs"] = payload.logs[-500:]
     canvas["settings"] = payload.settings or {}
-    save_canvas(canvas)
+    try:
+        canvas_repository().save_if_current(canvas, expected_updated_at=payload.base_updated_at)
+    except StaleCanvasRevisionError as error:
+        current = error.current
+        raise HTTPException(status_code=409, detail={
+            "message": "画布已被其他页面更新，已拒绝旧版本覆盖。",
+            "canvas": current,
+            "updated_at": int(current.get("updated_at") or 0),
+        })
     await manager.broadcast_canvas_updated(canvas_id, int(canvas.get("updated_at") or now_ms()), payload.client_id)
     return {"canvas": canvas}
+
+@app.post("/api/canvases/{canvas_id}/logs/delete")
+async def delete_canvas_log(canvas_id: str, payload: DeleteCanvasLogRequest):
+    canvas = load_canvas(canvas_id)
+    current_updated_at = int(canvas.get("updated_at") or 0)
+    if payload.base_updated_at and current_updated_at and int(payload.base_updated_at) < current_updated_at:
+        raise HTTPException(status_code=409, detail={
+            "message": "画布已被其他页面更新，已拒绝旧版本删除日志。",
+            "canvas": canvas,
+            "updated_at": current_updated_at,
+        })
+
+    logs = canvas.get("logs") if isinstance(canvas.get("logs"), list) else []
+    target_log = next((item for item in logs if str((item or {}).get("id") or "") == payload.log_id), None)
+    if target_log is None:
+        raise HTTPException(status_code=404, detail="画布日志不存在")
+    canvas["logs"] = [item for item in logs if item is not target_log]
+
+    candidate_urls = collect_local_media_urls(target_log)
+    reset_node_ids = []
+    if payload.delete_unreferenced_media and payload.reset_referencing_nodes:
+        target_paths = {
+            path for path in (generated_media_path_from_url(url) for url in candidate_urls)
+            if path
+        }
+        for node in canvas.get("nodes") or []:
+            owned_paths = {
+                path for path in (generated_media_path_from_url(url) for url in _canvas_node_owned_media_urls(node))
+                if path
+            }
+            if target_paths.isdisjoint(owned_paths):
+                continue
+            candidate_urls.extend(_reset_canvas_result_node(node))
+            node_id = str(node.get("id") or "")
+            if node_id and node_id not in reset_node_ids:
+                reset_node_ids.append(node_id)
+
+    # Persist the non-destructive Canvas mutation before removing media. If the
+    # save fails, no generated file has been touched; if cleanup later fails,
+    # the remaining file is merely orphaned and can be retried safely.
+    save_canvas(canvas)
+
+    removed_files = []
+    removed_previews = 0
+    skipped_referenced = []
+    removed_paths = set()
+    if payload.delete_unreferenced_media:
+        candidate_paths = []
+        for url in candidate_urls:
+            path = generated_media_path_from_url(url)
+            if path and path not in candidate_paths:
+                candidate_paths.append(path)
+        referenced_paths, ownership_unknown = _other_canvas_media_reference_paths(canvas)
+        for path in candidate_paths:
+            name = os.path.basename(path)
+            if ownership_unknown or path in referenced_paths:
+                if name not in skipped_referenced:
+                    skipped_referenced.append(name)
+                continue
+            if not os.path.isfile(path):
+                continue
+            removed_previews += _remove_media_preview_cache(path)
+            try:
+                os.remove(path)
+                removed_files.append(name)
+                removed_paths.add(path)
+            except OSError:
+                if name not in skipped_referenced:
+                    skipped_referenced.append(name)
+
+    _remove_deleted_media_from_history(removed_paths)
+    await manager.broadcast_canvas_updated(
+        canvas_id,
+        int(canvas.get("updated_at") or now_ms()),
+        payload.client_id,
+    )
+    return {
+        "canvas": canvas,
+        "removed_files": removed_files,
+        "removed_previews": removed_previews,
+        "skipped_referenced": skipped_referenced,
+        "reset_node_ids": reset_node_ids,
+    }
 
 @app.delete("/api/canvases/{canvas_id}")
 async def delete_canvas(canvas_id: str):
@@ -17327,9 +17741,10 @@ async def restore_canvas(canvas_id: str):
 
 @app.delete("/api/canvases/{canvas_id}/purge")
 async def purge_canvas(canvas_id: str):
-    path = canvas_path(canvas_id)
-    if os.path.exists(path):
-        os.remove(path)
+    try:
+        canvas_repository().purge(canvas_id)
+    except CanvasValidationError:
+        raise HTTPException(status_code=400, detail="无效的画布 ID")
     return {"ok": True}
 
 # --- GPT 对话 ---
@@ -17795,7 +18210,7 @@ async def delete_history(req: DeleteHistoryRequest):
 @app.post("/api/angle/poll_status")
 async def poll_angle_cloud(req: CloudPollRequest):
     api_root = modelscope_image_api_root()
-    clean_token = modelscope_api_key(req.api_key)
+    clean_token = modelscope_api_key()
     if not clean_token:
         raise HTTPException(status_code=400, detail="未提供 ModelScope API Key")
 
@@ -17866,7 +18281,7 @@ async def poll_angle_cloud(req: CloudPollRequest):
 @app.post("/api/angle/generate")
 async def generate_angle_cloud(req: CloudGenRequest):
     api_root = modelscope_image_api_root()
-    clean_token = modelscope_api_key(req.api_key)
+    clean_token = modelscope_api_key()
     if not clean_token:
         raise HTTPException(status_code=400, detail="未提供 ModelScope API Key")
 
@@ -17960,7 +18375,7 @@ async def generate_angle_cloud(req: CloudGenRequest):
 @app.post("/generate")
 async def generate_cloud(req: CloudGenRequest):
     api_root = modelscope_image_api_root()
-    clean_token = modelscope_api_key(req.api_key)
+    clean_token = modelscope_api_key()
     if not clean_token:
         raise HTTPException(status_code=400, detail="未提供 ModelScope API Key")
 
@@ -18049,7 +18464,7 @@ async def generate_cloud(req: CloudGenRequest):
 @app.post("/api/ms/generate")
 async def ms_generate(req: MsGenerateRequest):
     api_root = modelscope_image_api_root()
-    clean_token = modelscope_api_key(req.api_key)
+    clean_token = modelscope_api_key()
     if not clean_token:
         raise HTTPException(status_code=400, detail="未配置 ModelScope API Key，请在 API 设置中填写，或重新保存 ModelScope Token。")
 
@@ -19029,10 +19444,23 @@ def run_workflow(name: str, payload: WorkflowRunRequest):
     )
     return generate(req)
 
+
+if WORKBENCH_NODE_API_ENABLED:
+    app.include_router(create_canvas_nodes_router(
+        service_for_actor=local_node_creation_service,
+        mutation_service_for_actor=local_node_mutation_service,
+        graph_service_for_actor=local_graph_mutation_service,
+        node_lookup=local_node_lookup(),
+    ))
+
 if __name__ == "__main__":
     import uvicorn
     # 关闭服务端协议级 WebSocket ping：部分客户端（如 PS UXP 面板）不会自动回 pong，
     # 默认 20s ping/20s 超时会把这些连接每隔一会儿就踢掉造成"频繁断连"。
     # 客户端有自己的应用层心跳 + 断线重连兜底，这里禁用协议 ping 更稳。
-    uvicorn.run(app, host="0.0.0.0", port=3000,
+    if WORKBENCH_LAN_ENABLED:
+        print("WARNING: LAN mode is enabled without authentication. Restrict access to a trusted network.")
+    else:
+        print(f"AI Workbench is listening locally at http://127.0.0.1:{WORKBENCH_PORT}")
+    uvicorn.run(app, host=WORKBENCH_HOST, port=WORKBENCH_PORT,
                 ws_ping_interval=None, ws_ping_timeout=None)

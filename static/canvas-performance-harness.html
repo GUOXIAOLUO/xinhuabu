@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Canvas Performance Harness</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body { margin: 0; background: #101114; color: #e7e8ea; }
+    main { padding: 18px; max-width: 760px; }
+    h1 { font-size: 18px; margin: 0 0 12px; }
+    #status { white-space: pre-wrap; line-height: 1.55; background: #191b20; border: 1px solid #30343d; border-radius: 8px; padding: 14px; }
+    iframe { position: fixed; left: -1400px; top: -900px; width: 1280px; height: 800px; opacity: 0; pointer-events: none; border: 0; }
+    body.visible-target iframe { left: 0; top: 0; opacity: 1; z-index: 0; }
+    body.visible-target main { position: relative; z-index: 1; background: rgb(16 17 20 / 92%); }
+    .note { color: #9da3ae; font: 13px/1.5 system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Canvas Performance Harness</h1>
+    <div id="status" role="status">Preparing benchmark…</div>
+    <p class="note">Read-only harness: it loads an existing Canvas and observes its rendered DOM. Use only with disposable benchmark Canvas records.</p>
+  </main>
+  <iframe id="canvas-frame" title="Canvas benchmark target"></iframe>
+  <script>
+    (() => {
+      const params = new URLSearchParams(window.location.search);
+      const canvasId = params.get('id') || '';
+      const expectedNodes = Number(params.get('expected') || 0);
+      const measureInteractions = params.get('interactions') === '1';
+      const visibleTarget = params.get('visible') === '1';
+      const rendererFlags = [
+        'node_shell', 'legacy_renderer', 'media_renderer', 'semantic_zoom',
+        'screen_space_controls', 'unified_canvas',
+      ].filter(name => params.get(name) === '1');
+      const status = document.getElementById('status');
+      const frame = document.getElementById('canvas-frame');
+      document.body.classList.toggle('visible-target', visibleTarget);
+      const startedAt = performance.now();
+      const timeoutMs = 20000;
+      let frameLoadMs = null;
+      let finished = false;
+
+      const report = (lines) => { status.textContent = lines.join('\n'); };
+      if (!canvasId || !Number.isInteger(expectedNodes) || expectedNodes < 1) {
+        report(['ERROR', 'Required query parameters: id=<canvas id>&expected=<positive node count>']);
+        return;
+      }
+
+      frame.addEventListener('load', () => {
+        if (frameLoadMs === null) frameLoadMs = performance.now() - startedAt;
+      });
+      const rendererQuery = rendererFlags.map(name => `&${encodeURIComponent(name)}=1`).join('');
+      const benchmarkNonce = Date.now();
+      frame.src = `/static/canvas.html?id=${encodeURIComponent(canvasId)}&benchmark=1&benchmark_nonce=${benchmarkNonce}${rendererQuery}`;
+
+      const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+      const nextPaint = async () => { await nextFrame(); await nextFrame(); };
+      const timeUntil = async (action, complete) => {
+        const beganAt = performance.now();
+        action();
+        for (let frameCount = 0; frameCount < 10; frameCount += 1) {
+          await nextFrame();
+          if (complete()) return performance.now() - beganAt;
+        }
+        return null;
+      };
+      const runInteractionMeasurements = async (targetDocument) => {
+        const targetWindow = frame.contentWindow;
+        const board = targetDocument.getElementById('board');
+        const world = targetDocument.getElementById('world');
+        const minimapContent = targetDocument.getElementById('minimapContent');
+        if (!targetWindow || !board || !world || !minimapContent) {
+          return { error: 'Required Canvas interaction elements were not available.' };
+        }
+        await nextPaint();
+        const rect = board.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const beforeZoom = world.style.transform;
+        const zoomMs = await timeUntil(
+          () => board.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: centerX, clientY: centerY, deltaY: -100 })),
+          () => world.style.transform !== beforeZoom && minimapContent.querySelector('#minimapViewport')
+        );
+        const beforePan = world.style.transform;
+        const panMs = await timeUntil(
+          () => {
+            board.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, clientX: centerX, clientY: centerY }));
+            targetWindow.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, button: 0, clientX: centerX + 80, clientY: centerY + 50 }));
+            targetWindow.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0, clientX: centerX + 80, clientY: centerY + 50 }));
+          },
+          () => world.style.transform !== beforePan && minimapContent.querySelector('#minimapViewport')
+        );
+        const oldViewport = minimapContent.querySelector('#minimapViewport');
+        const oldViewportStyle = oldViewport?.getAttribute('style') || '';
+        const mapRect = minimapContent.getBoundingClientRect();
+        const minimapMs = await timeUntil(
+          () => {
+            minimapContent.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, clientX: mapRect.left + mapRect.width * 0.75, clientY: mapRect.top + mapRect.height * 0.75 }));
+            targetWindow.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0, clientX: mapRect.left + mapRect.width * 0.75, clientY: mapRect.top + mapRect.height * 0.75 }));
+          },
+          () => {
+            const nextViewport = minimapContent.querySelector('#minimapViewport');
+            return !!nextViewport && (nextViewport !== oldViewport || nextViewport.getAttribute('style') !== oldViewportStyle);
+          }
+        );
+        return { zoomMs, panMs, minimapMs };
+      };
+
+      const observe = () => {
+        if (finished) return;
+        const elapsedMs = performance.now() - startedAt;
+        let renderedNodes = 0;
+        let targetDomElements = 0;
+        let targetDocument = null;
+        try {
+          targetDocument = frame.contentDocument;
+          renderedNodes = targetDocument ? targetDocument.querySelectorAll('[data-id]').length : 0;
+          targetDomElements = targetDocument ? targetDocument.querySelectorAll('*').length : 0;
+        } catch (_error) {
+          // Same-origin access is expected for this local development harness.
+        }
+        if (renderedNodes >= expectedNodes) {
+          finished = true;
+          const lines = [
+            'RESULT: PASS',
+            `expected_nodes=${expectedNodes}`,
+            `rendered_nodes=${renderedNodes}`,
+            `renderer_flags=${rendererFlags.length ? rendererFlags.join(',') : 'none'}`,
+            `target_visibility=${visibleTarget ? 'visible' : 'offscreen'}`,
+            `iframe_load_ms=${frameLoadMs === null ? 'unavailable' : frameLoadMs.toFixed(3)}`,
+            `render_ready_ms=${elapsedMs.toFixed(3)}`,
+            `target_dom_elements=${targetDomElements}`,
+          ];
+          if (measureInteractions && targetDocument) {
+            report([...lines, 'interaction_measurement=running']);
+            runInteractionMeasurements(targetDocument).then(result => {
+              if (result.error) {
+                report([...lines, 'interaction_result=ERROR', `interaction_error=${result.error}`]);
+                return;
+              }
+              const format = value => value === null ? 'timeout' : value.toFixed(3);
+              report([
+                ...lines,
+                'interaction_result=PASS',
+                `zoom_visual_update_ms=${format(result.zoomMs)}`,
+                `pan_visual_update_ms=${format(result.panMs)}`,
+                `minimap_refresh_ms=${format(result.minimapMs)}`,
+              ]);
+            }).catch(error => report([...lines, 'interaction_result=ERROR', `interaction_error=${error.message}`]));
+            return;
+          }
+          report(lines);
+          return;
+        }
+        if (elapsedMs >= timeoutMs) {
+          finished = true;
+          report([
+            'RESULT: TIMEOUT',
+            `expected_nodes=${expectedNodes}`,
+            `rendered_nodes=${renderedNodes}`,
+            `waited_ms=${elapsedMs.toFixed(3)}`,
+          ]);
+          return;
+        }
+        requestAnimationFrame(observe);
+      };
+      requestAnimationFrame(observe);
+    })();
+  </script>
+</body>
+</html>

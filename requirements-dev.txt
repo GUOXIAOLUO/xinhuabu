@@ -1,0 +1,3 @@
+# Reproducible development and test environment.
+# The current test suite uses Python's standard-library unittest runner.
+-r requirements.txt
