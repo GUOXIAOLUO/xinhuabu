@@ -34,26 +34,28 @@ class SqliteCanvasCompatibilityRepository(CanvasRepository):
         else:
             record = self._repository.load_canvas_record(canvas_id)
             payload = self._with_compatibility_timestamp(canvas, current)
-            _, saved = self._repository.replace_canvas_payload(
-                actor_id=self._actor_id, canvas_id=canvas_id, expected_revision=record.revision, payload=payload,
-            )
+            saved = self._replace_at_revision(canvas_id, record.revision, payload)
         canvas.clear()
         canvas.update(saved)
         return canvas
 
     def save_if_current(self, canvas: dict[str, Any], *, expected_updated_at: int | None) -> dict[str, Any]:
-        current = self.load(self._canvas_id(canvas.get("id")), include_deleted=True)
+        canvas_id = self._canvas_id(canvas.get("id"))
+        current = self.load(canvas_id, include_deleted=True)
         current_updated_at = int(current.get("updated_at") or 0)
         if expected_updated_at and current_updated_at and int(expected_updated_at) < current_updated_at:
             raise StaleCanvasRevisionError(current)
-        return self.save(canvas)
+        record = self._repository.load_canvas_record(canvas_id)
+        payload = self._with_compatibility_timestamp(canvas, current)
+        saved = self._replace_at_revision(canvas_id, record.revision, payload)
+        canvas.clear()
+        canvas.update(saved)
+        return canvas
 
     def save_metadata(self, canvas: dict[str, Any]) -> dict[str, Any]:
         canvas_id = self._canvas_id(canvas.get("id"))
         record = self._repository.load_canvas_record(canvas_id)
-        _, saved = self._repository.replace_canvas_payload(
-            actor_id=self._actor_id, canvas_id=canvas_id, expected_revision=record.revision, payload=canvas,
-        )
+        saved = self._replace_at_revision(canvas_id, record.revision, canvas)
         canvas.clear()
         canvas.update(saved)
         return canvas
@@ -80,8 +82,23 @@ class SqliteCanvasCompatibilityRepository(CanvasRepository):
         current_updated_at = int(canvas.get("updated_at") or 0)
         if expected_updated_at and current_updated_at and int(expected_updated_at) < current_updated_at:
             raise StaleCanvasRevisionError(canvas)
+        record = self._repository.load_canvas_record(self._canvas_id(canvas_id))
         mutation(canvas)
-        return self.save(canvas)
+        payload = self._with_compatibility_timestamp(canvas, canvas)
+        return self._replace_at_revision(self._canvas_id(canvas_id), record.revision, payload)
+
+    def _replace_at_revision(self, canvas_id: str, expected_revision: int, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            _, saved = self._repository.replace_canvas_payload(
+                actor_id=self._actor_id, canvas_id=canvas_id, expected_revision=expected_revision, payload=payload,
+            )
+            return saved
+        except CanonicalStaleRevisionError as error:
+            try:
+                current = self.load(canvas_id, include_deleted=True)
+            except CanvasNotFoundError:
+                current = {"id": canvas_id, "revision": error.current_revision}
+            raise StaleCanvasRevisionError(current) from error
 
     @staticmethod
     def _canvas_id(value: Any) -> str:

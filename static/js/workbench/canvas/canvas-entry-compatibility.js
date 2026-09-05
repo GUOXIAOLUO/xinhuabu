@@ -17,8 +17,11 @@
         return String(canvas?.kind || 'classic').trim() === 'smart';
     }
 
-    function legacySmartCanvasUrl(canvasId) {
-        return `/static/smart-canvas.html?id=${encodeURIComponent(requiredId(canvasId, 'canvasId'))}`;
+    function legacySmartCanvasUrl(canvasId, search) {
+        const params = new URLSearchParams(String(search || '').replace(/^\?/, ''));
+        params.delete('id');
+        const suffix = params.toString();
+        return `/static/smart-canvas.html?id=${encodeURIComponent(requiredId(canvasId, 'canvasId'))}${suffix ? `&${suffix}` : ''}`;
     }
 
     global.WorkbenchCanvasEntryCompatibility = Object.freeze({normalCanvasUrl, requiresLegacySmartHandoff, legacySmartCanvasUrl});

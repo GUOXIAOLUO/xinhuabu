@@ -21,7 +21,7 @@ client_v1: Web UI
 orchestration_target: Codex Harness / App Server
 wholehouse_role: first Industry Package, not Core
 canvas_target: one Unified Canvas
-current_persistence_authority: Legacy JSON and filesystem
+current_persistence_authority: SQLite CanvasRecord for normal Canvas routing; Legacy JSON/filesystem compatibility elsewhere
 agent_dom_mutation_allowed: false
 silent_model_provider_executor_fallback_allowed: false
 
@@ -36,12 +36,46 @@ R3 is complete. R4 is active. R3 supplied the SQLite Project/Canvas foundation, 
 revision, authorization, migration comparison, rollback export, transactional
 audit/outbox, and migration-report command are tested. The live Legacy report at
 2026-09-04T23:36:06Z imported 22 Canvas files, skipped 0, and found 0 payload
-differences. The default page/route runtime remains Legacy JSON. R4 now has a
-tested SQLite compatibility repository and double-gated selector. SQLite authority
-state was activated locally after the validated backup/compare (22 payloads), and
-an isolated flag-enabled process passed API and read-only browser acceptance. The
-flag remains false by default; no general page/runtime switch or Legacy removal has
-occurred.
+differences. R4 now has a tested SQLite compatibility repository with true SQL
+compare-and-swap. SQLite authority was activated locally after the validated
+backup/compare (22 payloads), and canonical routing is now the default runtime when
+that authority state is `sqlite`; an explicit false value is a bounded rollback
+control while U7 remains in progress. Isolated API, browser read, browser write,
+restart, stale-conflict, and rollback-export acceptance passed. The retained
+Classic/Smart editor adapters now share the neutral CanvasRecord load/save/metadata
+client, version-poll coordinator, and transport-neutral update-message filter;
+their existing polling intervals and merge behavior remain adapter-owned.
+The shared state runtime is now default-on, with `unified_canvas=0` retained as
+the bounded U7 rollback control. Read-only browser rechecks of both Classic and
+historical Smart records passed on the default URL path; this does not yet
+authorize page deletion. NodeShell base is also default-on on loopback, with
+`node_shell=0` retained as its bounded U7 rollback control. MediaRenderer is
+default-on on loopback with `media_renderer=0` as its bounded U7 rollback control.
+Legacy source-payload rendering inside NodeShell is also default-on, with
+`legacy_renderer=0` retained as its bounded U7 rollback control.
+Semantic zoom is default-on with `semantic_zoom=0` retained as its bounded U7
+rollback control.
+Smart screen-space controls are default-on with `screen_space_controls=0`
+retained as their bounded U7 rollback control.
+The historical Smart handoff now preserves query parameters while replacing the
+Canvas id and cache version, so the explicit all-zero rollback is effective from
+the normal Canvas URL as well as the retained adapter URL.
+Canvas list and asset-manager openings now both use the normal `canvas.html`
+entry through the same `normalCanvasUrl` contract; direct Smart page routing is
+confined to the retained compatibility boundary.
+The asset manager now presents a single business-neutral `画布` category and no
+longer exposes Classic/Smart source labels or filters; retained `kind` is
+compatibility metadata only.
+Classic and Smart workflow import/export now share one transport-only archive
+client for the existing backend contract. Each retained adapter still owns its
+selection payload, node insertion, save scheduling, and UI feedback.
+An automated source-reference guard verifies that Canvas list, asset manager, and
+the Canvas editor contain no direct Smart page URL; only the compatibility module
+may construct that historical deep link.
+The Canvas editor also no longer duplicates the Smart `kind` check; it delegates
+the handoff decision exclusively to that compatibility module.
+Legacy JSON remains the bounded import/rollback adapter, and duplicate page/runtime
+removal has not occurred.
 
 R4 source backup/validation is complete locally: `data/canvas-source-backups/`
 contains a verified 22-file snapshot with manifest SHA-256
@@ -62,14 +96,14 @@ diagnostic exists.
 | U4 | complete | Shared catalog and restricted versioned creation/graph APIs are used by Classic blank Image/Prompt/Loop/Group/Output and Smart blank Image/Prompt/Loop/Group/MiniMax menus when explicitly enabled on loopback. Unmigrated page-owned constructors/imports remain compatibility paths. |
 | U5 | complete | Shared result-placement intent and narrow Classic/Smart compatibility wrapper preserve Legacy execution. Behavioral tests cover frozen completion metadata, retained-error failure metadata, and both page-entry fallbacks. No unified executor runtime exists. |
 | U6 | complete | Canvas list exposes one normal creation choice, hides source-kind labels, and opens one normal `canvas.html` entry; a side-effect-free resolver scopes historical Smart handoff to its retained compatibility adapter. |
-| U7 | pending | No canonical cutover, record migration, or duplicate runtime/page removal |
+| U7 | in_progress | SQLite is the default canonical page/route persistence after validated authority activation; retained Classic/Smart adapters now use one neutral CanvasRecord load/save/metadata client, version-poll coordinator, transport-neutral update-message filter, and workflow archive transport client while preserving their polling, merge, selection, insertion, and UI behavior. Shared state, NodeShell base, MediaRenderer, LegacyRenderer, semantic zoom, and Smart screen-space controls are default-on with explicit `unified_canvas=0` / `node_shell=0` / `media_renderer=0` / `legacy_renderer=0` / `semantic_zoom=0` / `screen_space_controls=0` rollback. Canvas list and asset manager use the normal entry; the asset manager presents one neutral `画布` category, while source guards confine Smart URLs and handoff decisions to the compatibility module. Default-path browser reads and the all-zero rollback both passed for Classic and historical Smart, and the Smart handoff preserves the rollback query. Isolated browser creation, restart, stale-conflict, and lossless rollback export are tested. Duplicate runtime/page removal and final flag removal remain pending. |
 
 ## Verified authority map
 
 | Domain | Authority and status |
 |---|---|
 | Project | `data/projects.json` remains page/route runtime authority; R3 SQLite ProjectRecord/ProjectMember records and action authorization are a verified canonical foundation awaiting R4 cutover |
-| Canvas | Default page/route runtime is `data/canvases/*.json`; R3 SQLite CanvasRecord stores lossless payload plus logical revision and explicit `legacy_json`/`sqlite` authority state. A live 22-file backfill/compare and R4 isolated flag-enabled API/browser acceptance passed; the flag remains false by default and cutover is incomplete |
+| Canvas | SQLite CanvasRecord is the default page/route persistence when explicit authority state is `sqlite`; it stores lossless payload plus logical revision. `data/canvases/*.json` is retained only as import/rollback compatibility. A live 22-file backfill/compare, isolated Classic/Smart browser reads, browser creation, restart, stale-conflict, and lossless rollback-export acceptance passed; duplicate UI runtime removal is incomplete |
 | Node/Edge | Embedded Canvas dictionaries; NodeRecord/EdgeRecord are validated adapter/API views only |
 | Asset | Files in configured asset directories plus JSON library/storage/shared-folder metadata; no AssetVersion authority |
 | Workflow | `workflows/*.json`/configs and Canvas workflow archives/library items; no formal WorkflowVersion/Run |
@@ -115,13 +149,13 @@ handoff: not_implemented
 | `WORKBENCH_ALLOWED_ORIGINS` | loopback origins on selected port | Explicit comma list allowed; wildcard rejected |
 | `WORKBENCH_LAN_ENABLED` | false | Derived from wildcard bind host |
 | `WORKBENCH_NODE_API_ENABLED` | true on default loopback | `/api/v1` router registered only for loopback host values |
-| `WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED` | false | Selects SQLite compatibility persistence only when explicitly true and SQLite authority state is `sqlite`; false does not initialize SQLite |
-| `unified_canvas=1` | off | Enables shared state adapter when module is present |
-| `node_shell=1` | off | Enables NodeShell base on loopback |
-| `legacy_renderer=1` | off | Requires NodeShell; opts into source-payload renderer |
-| `media_renderer=1` | off | Opts into media renderer/NodeShell paths |
-| `semantic_zoom=1` | off | Requires NodeShell |
-| `screen_space_controls=1` | off | Requires NodeShell |
+| `WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED` | true | Selects SQLite compatibility persistence when SQLite authority state is `sqlite`; explicit false is the bounded U7 rollback control, and inactive authority does not initialize/switch data |
+| `unified_canvas=0` | default-on | Shared state adapter is enabled whenever its module is present; explicit `0` is the bounded U7 rollback control pending complete page/runtime replacement |
+| `node_shell=0` | default-on | Enables NodeShell base on loopback; explicit `0` is the bounded U7 rollback control pending complete page/runtime replacement |
+| `legacy_renderer=0` | default-on | Uses source-payload rendering inside NodeShell; explicit `0` is the bounded U7 rollback control pending complete page/runtime replacement |
+| `media_renderer=0` | default-on | Enables media renderer/NodeShell paths on loopback; explicit `0` is the bounded U7 rollback control pending complete page/runtime replacement |
+| `semantic_zoom=0` | default-on | Enables NodeShell semantic presentation on loopback; explicit `0` is the bounded U7 rollback control pending complete page/runtime replacement |
+| `screen_space_controls=0` | default-on | Enables Smart NodeShell screen-space controls on loopback; explicit `0` is the bounded U7 rollback control pending complete page/runtime replacement |
 
 ## Provider/model/settings and Codex
 
@@ -158,7 +192,7 @@ Command:
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -q
 ```
 
-Result: PASS after current R4 work — 206 tests in 1.455 seconds, Python 3.14.7.
+Result: PASS after current R4 work — 221 tests in 1.591 seconds, Python 3.14.7.
 
 R4 canonical-routing local acceptance:
 
@@ -180,6 +214,19 @@ active records; Classic record `7ed83bf56f234d77a9e67ae1f6496577` rendered its
 page. No save/generation/delete action was invoked. The temporary process was
 stopped after the browser retained a WebSocket connection; its cancellation log is
 shutdown noise, not an application request failure.
+
+R4 default-routing browser write acceptance: PASS — a separate localhost service
+used a process-lifetime temporary SQLite database, seeded one Classic and one Smart
+record under activated SQLite authority, and had startup hooks disabled. The list
+rendered both records; browser creation of `R4 browser write acceptance` increased
+the visible count from 2 to 3. The process stopped and its temporary database was
+discarded. No user project Canvas was written.
+
+R4 persistence acceptance: PASS — focused tests prove SQL `id + revision` CAS,
+409 stale-write semantics through the Legacy compatibility API, restart persistence,
+unknown-field retention, and lossless rollback export back to `legacy_json` authority.
+Startup no longer rewrites `static/*.html`; runtime cache-version responses remain
+dynamic and source files stay unchanged after a server start.
 
 R3 focused command:
 
@@ -213,6 +260,52 @@ Classic and Smart records loaded with `unified_canvas=1`, `node_shell=1`, both
 renderer flags, `semantic_zoom=1`, and `screen_space_controls=1`. Both displayed
 shared NodeShell ready state, generic ports, and semantic summary controls; no
 Canvas data or execution was mutated.
+
+Default-on `unified_canvas` browser recheck (read-only, isolated
+`127.0.0.1:3005` server): PASS — Classic record
+`7ed83bf56f234d77a9e67ae1f6496577` loaded at its normal `canvas.html` URL with
+its nodes and controls visible. Historical Smart record
+`ca914662f0dc4923bd5b60b29eb55b68` opened from the same normal URL and reached
+its retained `smart-canvas.html` adapter with nodes and controls visible. Neither
+Canvas was saved, created, or executed. This does not authorize page deletion.
+
+Default-on `node_shell` browser recheck (read-only, same isolated server): PASS
+— the Classic record remained readable at its normal URL, and the retained Smart
+adapter displayed its Smart Group through a ready NodeShell with generic Input and
+Output ports. Neither Canvas was saved, created, or executed. Explicit
+`node_shell=0` remains the bounded U7 rollback control.
+
+Default-on `media_renderer` browser recheck (read-only, same isolated server):
+PASS — the Classic media node rendered through a ready unified card with its media
+controls and generic Input/Output ports. The retained Smart adapter remained
+readable with its ready Smart Group shell and ports. Neither Canvas was saved,
+created, or executed; `media_renderer=0` remains the bounded U7 rollback control.
+
+Default-on `legacy_renderer` browser recheck (read-only, same isolated server):
+PASS — Classic video, LLM, Comfy, and Output nodes were ready inside NodeShell
+while retaining their source-owned controls and generic ports. The retained Smart
+Legacy skill node was likewise ready in NodeShell with its original controls.
+Neither Canvas was saved, created, or executed; `legacy_renderer=0` remains the
+bounded U7 rollback control.
+
+Default-on `semantic_zoom` browser recheck (read-only, same isolated server):
+PASS — Classic displayed the semantic indicator at `100% · 完整 · 6 节点`, while
+the retained Smart adapter displayed `65% · 摘要 · 2 节点` and its corresponding
+summary node presentation. Neither Canvas was saved, created, or executed;
+`semantic_zoom=0` remains the bounded U7 rollback control.
+
+Default-on `screen_space_controls` browser recheck (read-only, same isolated
+server): PASS — the retained Smart adapter remained readable in semantic summary
+mode with generic Input/Output ports visible for both ready NodeShell nodes.
+Neither Canvas was saved, created, or executed; `screen_space_controls=0` remains
+the bounded U7 rollback control.
+
+All-zero UI-flag rollback browser recheck (read-only, same isolated server): PASS
+— Classic restored its retained non-NodeShell presentation. Historical Smart was
+opened through the normal `canvas.html` URL with all six explicit zero flags; the
+handoff retained every flag in its `smart-canvas.html` URL and restored the
+retained non-NodeShell presentation. Neither Canvas was saved, created, or
+executed.
 
 R1 focused command:
 
@@ -347,11 +440,11 @@ follow-up. All are single local samples, not percentile/release commitments.
 
 ## Blockers
 
-No external blocker. Source backup/validation, explicit SQLite authority activation,
-flag-enabled API/read-only browser acceptance, write-compatibility tests, and the
-deterministic benchmark are complete. R4 remains incomplete: default runtime
-cutover, workflow import/export route parity, and duplicate Classic/Smart runtime
-and page removal have not passed their acceptance gates.
+No external blocker. Source backup/validation, SQLite authority activation, default
+canonical routing, isolated Classic/Smart browser reads and browser creation,
+restart/stale-conflict/rollback verification, workflow archive round-trip, and the
+deterministic benchmark are complete. R4 remains incomplete only at U7: duplicate
+Classic/Smart runtime and page removal, followed by UI migration-flag retirement.
 
 ## Exactly one next authorized Round
 
@@ -363,6 +456,8 @@ Until R4 passes, do not execute R5-R17, make NodeRecord incompatible changes, im
 ProviderConnection/ModelRegistry/
 ModelAvailability, ExecutorRegistry/ExecutionRuntime, Asset/Artifact/Entity/
 Knowledge/Workflow/Approval/Handoff runtimes, PackageRuntime, Common/WholeHouse
-packages, Agent graph mutation, interactive Codex approval, or Legacy Canvas
-duplicate removal. Do not add new Workbench business responsibility to `main.py`,
+packages, Agent graph mutation, interactive Codex approval, or unverified Legacy
+Canvas adapter/page removal. U7 may remove a duplicate only after its replacement
+has focused interaction, browser, rollback, and source-reference acceptance. Do not
+add new Workbench business responsibility to `main.py`,
 `static/js/canvas.js`, or `static/js/smart-canvas.js`.

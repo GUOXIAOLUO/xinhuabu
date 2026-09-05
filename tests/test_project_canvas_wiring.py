@@ -31,3 +31,6 @@ class ProjectCanvasWiringTests(unittest.TestCase):
                 canonical = main.canonical_project_canvas_repository()
                 canonical.activate_sqlite_authority([])
                 self.assertIsInstance(main.canvas_repository(), SqliteCanvasCompatibilityRepository)
+
+    def test_r4_canonical_routing_is_enabled_by_default(self):
+        self.assertTrue(main.WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED)

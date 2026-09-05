@@ -16,9 +16,12 @@ class LegacyCanvasFixtureTests(unittest.TestCase):
         self.canvas_dir = Path(self.temp.name) / "canvases"
         self.canvas_dir.mkdir(parents=True)
         self.canvas_patch = patch.object(main, "CANVAS_DIR", str(self.canvas_dir))
+        self.routing_patch = patch.object(main, "WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED", False)
         self.canvas_patch.start()
+        self.routing_patch.start()
 
     def tearDown(self):
+        self.routing_patch.stop()
         self.canvas_patch.stop()
         self.temp.cleanup()
 

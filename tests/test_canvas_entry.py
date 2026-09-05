@@ -29,17 +29,33 @@ class CanvasEntryTests(unittest.TestCase):
         self.assertIn("/static/canvas.html", opening)
         self.assertNotIn("/static/smart-canvas.html", opening)
 
+    def test_asset_manager_uses_the_same_normal_canvas_entry(self):
+        source = (ROOT / "static" / "js" / "asset-manager.js").read_text(encoding="utf-8")
+        page = (ROOT / "static" / "asset-manager.html").read_text(encoding="utf-8")
+        opening = source[source.index("function canvasAssetOpenUrl(canvas){") : source.index("function activeCanvasAssetCanvas", source.index("function canvasAssetOpenUrl(canvas){"))]
+        self.assertIn("WorkbenchCanvasEntryCompatibility.normalCanvasUrl", opening)
+        self.assertNotIn("/static/smart-canvas.html", opening)
+        self.assertLess(page.index("workbench/canvas/canvas-entry-compatibility.js"), page.index("asset-manager.js"))
+
+    def test_asset_manager_hides_legacy_canvas_source_categories(self):
+        source = (ROOT / "static" / "js" / "asset-manager.js").read_text(encoding="utf-8")
+        categories = source[source.index("function canvasAssetCategories(){") : source.index("function activeCanvasAssetCategoryInfo", source.index("function canvasAssetCategories(){"))]
+        self.assertIn("id:'all', name:'画布'", categories)
+        self.assertNotIn("智能画布", source)
+        self.assertNotIn("普通画布", source)
+
     def test_entry_compatibility_keeps_one_normal_entry_and_scopes_smart_handoff(self):
         source = ENTRY_COMPATIBILITY.read_text(encoding="utf-8")
         self.assertNotIn("fetch(", source)
         self.assertNotIn("localStorage", source)
         result = subprocess.run(["node", "-e", f"""
-const fs=require('fs'), vm=require('vm'); const sandbox={{window:{{}}}};
+const fs=require('fs'), vm=require('vm'); const sandbox={{window:{{}}, URLSearchParams}};
 vm.runInNewContext(fs.readFileSync({json.dumps(str(ENTRY_COMPATIBILITY))}, 'utf8'), sandbox);
 const E=sandbox.window.WorkbenchCanvasEntryCompatibility;
 console.log(JSON.stringify({{
   normal:E.normalCanvasUrl('canvas / 1', 'project / 1'),
   smart:E.legacySmartCanvasUrl('canvas / 1'),
+  retained:E.legacySmartCanvasUrl('canvas / 1', '?id=obsolete&unified_canvas=0&node_shell=0'),
   historical:E.requiresLegacySmartHandoff({{kind:'smart'}}),
   normalRecord:E.requiresLegacySmartHandoff({{kind:'classic'}}),
   missingKind:E.requiresLegacySmartHandoff({{}}),
@@ -48,7 +64,31 @@ console.log(JSON.stringify({{
         self.assertEqual(json.loads(result.stdout), {
             "normal": "/static/canvas.html?id=canvas%20%2F%201&project=project%20%2F%201",
             "smart": "/static/smart-canvas.html?id=canvas%20%2F%201",
+            "retained": "/static/smart-canvas.html?id=canvas%20%2F%201&unified_canvas=0&node_shell=0",
             "historical": True,
             "normalRecord": False,
             "missingKind": False,
         })
+
+    def test_historical_smart_handoff_preserves_the_current_query(self):
+        source = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        handoff = source[source.index("function openSmartCanvasPage(id){") : source.index("function toggleEmojiPicker", source.index("function openSmartCanvasPage(id){"))]
+        self.assertIn("legacySmartCanvasUrl(id, window.location.search)", handoff)
+        self.assertIn("const handoffParams = new URLSearchParams(window.location.search);", handoff)
+        self.assertIn("handoffParams.set('id', id);", handoff)
+        self.assertIn("handoffParams.set('v', '2026.05.22.1');", handoff)
+        self.assertNotIn("/static/smart-canvas.html", source)
+
+    def test_product_openers_confine_smart_page_urls_to_the_compatibility_boundary(self):
+        compatibility = ENTRY_COMPATIBILITY.read_text(encoding="utf-8")
+        self.assertIn("/static/smart-canvas.html", compatibility)
+        for name in ("canvas-list.js", "asset-manager.js", "canvas.js"):
+            source = (ROOT / "static" / "js" / name).read_text(encoding="utf-8")
+            self.assertNotIn("/static/smart-canvas.html", source)
+
+    def test_canvas_editor_uses_only_the_entry_compatibility_handoff_decision(self):
+        source = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        opening = source[source.index("async function openCanvas(id){") : source.index("function applyRemoteCanvasData", source.index("async function openCanvas(id){"))]
+        self.assertIn("WorkbenchCanvasEntryCompatibility.requiresLegacySmartHandoff(canvas)", opening)
+        self.assertNotIn("!window.WorkbenchCanvasEntryCompatibility", opening)
+        self.assertNotIn("(canvas.kind || 'classic') === 'smart'", opening)

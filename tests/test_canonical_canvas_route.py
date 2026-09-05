@@ -40,3 +40,19 @@ class CanonicalCanvasRouteTests(unittest.TestCase):
             asyncio.run(main.update_canvas("canvas-1", stale))
         self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(main.canvas_repository().load("canvas-1")["title"], "After")
+
+    def test_canonical_write_survives_reopen_and_produces_a_lossless_rollback_export(self):
+        current_updated_at = main.canvas_repository().load("canvas-1")["updated_at"]
+        request = main.CanvasSaveRequest(
+            title="Restart-safe", nodes=[{"id": "node-1", "type": "legacy", "future": {"kept": True}}],
+            connections=[], viewport={}, logs=[], settings={"future": "kept"}, base_updated_at=current_updated_at,
+        )
+        response = asyncio.run(main.update_canvas("canvas-1", request))
+
+        reopened = main.canonical_project_canvas_repository()
+        self.assertEqual(reopened.load_canvas_record("canvas-1").revision, 2)
+        self.assertEqual(reopened.load_canvas_payload("canvas-1")["nodes"][0]["future"], {"kept": True})
+
+        exports = reopened.rollback_to_legacy_authority()
+        self.assertEqual(reopened.canvas_authority(), "legacy_json")
+        self.assertEqual(exports, [response["canvas"]])

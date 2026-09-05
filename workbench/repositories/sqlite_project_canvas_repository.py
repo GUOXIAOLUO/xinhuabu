@@ -362,12 +362,17 @@ class SqliteProjectCanvasRepository:
             revision = int(row["revision"]) + 1
             payload["id"] = canvas_id
             payload["project"] = row["project_id"]
-            connection.execute(
-                "UPDATE canvases SET title=?, viewport_json=?, payload_json=?, revision=?, updated_at=?, deleted_at=? WHERE id=?",
+            updated_cursor = connection.execute(
+                "UPDATE canvases SET title=?, viewport_json=?, payload_json=?, revision=?, updated_at=?, deleted_at=? WHERE id=? AND revision=?",
                 (str(payload.get("title") or row["title"]), json.dumps(payload.get("viewport") or {}, sort_keys=True),
                  json.dumps(payload, ensure_ascii=False, sort_keys=True), revision, _iso(now),
-                 _iso(_parse_legacy_time(payload.get("deleted_at"))) if payload.get("deleted_at") else None, canvas_id),
+                 _iso(_parse_legacy_time(payload.get("deleted_at"))) if payload.get("deleted_at") else None, canvas_id, expected_revision),
             )
+            if updated_cursor.rowcount != 1:
+                current = connection.execute("SELECT revision FROM canvases WHERE id=?", (canvas_id,)).fetchone()
+                if not current:
+                    raise CanonicalNotFoundError("canvas not found")
+                raise CanonicalStaleRevisionError(int(current["revision"]))
             self._append_audit(connection, "canvas.mutated", row["project_id"], canvas_id, actor_id, {"revision": revision})
             updated = connection.execute("SELECT * FROM canvases WHERE id=?", (canvas_id,)).fetchone()
         return self._canvas_record(updated), payload

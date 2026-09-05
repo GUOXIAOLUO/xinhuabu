@@ -395,10 +395,10 @@ let menuPoint = null;
 let linkCreateState = null;
 let internalDrag = false;
 let selected = new Set();
-// Opt-in shared state while the two page adapters are being converged. It
-// owns only generic viewport, selection and geometry state; this page keeps
-// rendering and persistence compatibility.
-const canvasUnifiedRuntimeEnabled = new URLSearchParams(window.location.search).get('unified_canvas') === '1'
+// Default-on shared state while the two page adapters are being converged. It
+// owns only generic viewport, selection and geometry state; an explicit zero
+// remains the bounded U7 rollback control while rendering stays compatible.
+const canvasUnifiedRuntimeEnabled = new URLSearchParams(window.location.search).get('unified_canvas') !== '0'
     && Boolean(window.WorkbenchCanvasRuntime);
 let canvasUnifiedRuntime = null;
 function canvasRuntimeGeometry(){
@@ -481,8 +481,7 @@ let savingCanvasNow = false;
 let saveCanvasAgain = false;
 let applyingRemoteCanvas = false;
 let remoteSyncTimer = null;
-let remoteSyncInterval = null;
-let remoteSyncBusy = false;
+let canvasRemoteSync = null;
 let lastCanvasUpdatedAt = 0;
 let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
 let imageModels = ['gpt-image-2', 'nano-banana-pro'];
@@ -1287,8 +1286,8 @@ function applyViewport(){
 }
 function canvasNodeShellSemanticZoomEnabled(){
     const params = new URLSearchParams(window.location.search);
-    return params.get('semantic_zoom') === '1'
-        && params.get('node_shell') === '1'
+    return params.get('semantic_zoom') !== '0'
+        && params.get('node_shell') !== '0'
         && window.WorkbenchNodeClient?.isLoopback?.()
         && window.WorkbenchSemanticZoom;
 }
@@ -1297,7 +1296,7 @@ function applyCanvasNodeShellSemanticZoom(){
     const enabled = canvasNodeShellSemanticZoomEnabled();
     nodesEl.classList.toggle('node-shell-semantic-zoom', Boolean(enabled));
     const existingIndicator = shell?.querySelector?.('#canvasSemanticZoomIndicator');
-    // Semantic zoom is an explicit, page-load feature gate. Avoid walking every
+    // Semantic zoom is a default-on, page-load feature. Avoid walking every
     // Legacy/NodeShell card on ordinary pan and minimap updates when it is off.
     if(!enabled){
         existingIndicator?.remove();
@@ -1647,25 +1646,20 @@ async function saveCanvas(){
     savingCanvasNow = true;
     saveCanvasAgain = false;
     try {
-        const res = await fetch(`/api/canvases/${canvas.id}`, {
-            method:'PUT',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                title:canvas.title,
-                icon:canvas.icon || '🧩',
-                nodes:serializableCanvasNodes(),
-                connections,
-                viewport,
-                logs:canvas.logs || [],
-                client_id:CLIENT_ID,
-                base_updated_at:Number(lastCanvasUpdatedAt || canvas.updated_at || 0)
-            })
+        const result = await window.WorkbenchCanvasPersistence.save(canvas.id, {
+            title:canvas.title,
+            icon:canvas.icon || '🧩',
+            nodes:serializableCanvasNodes(),
+            connections,
+            viewport,
+            logs:canvas.logs || [],
+            client_id:CLIENT_ID,
+            base_updated_at:Number(lastCanvasUpdatedAt || canvas.updated_at || 0)
         });
-        if(res.status === 409){
-            const data = await res.json().catch(() => ({}));
-            const remote = data.detail?.canvas || data.canvas;
+        if(result.status === 409){
+            const remote = result.canvas;
             if(localCanvasDirty || saveCanvasAgain){
-                lastCanvasUpdatedAt = Number(data.detail?.updated_at || data.updated_at || remote?.updated_at || lastCanvasUpdatedAt || 0);
+                lastCanvasUpdatedAt = Number(result.updatedAt || remote?.updated_at || lastCanvasUpdatedAt || 0);
                 saveCanvasAgain = true;
                 setStatus('Saving...');
                 return;
@@ -1674,8 +1668,8 @@ async function saveCanvas(){
             setStatus('Synced');
             return;
         }
-        if(!res.ok) throw new Error('save failed');
-        const data = await res.json().catch(() => ({}));
+        if(!result.ok) throw new Error('save failed');
+        const data = result.payload;
         const localViewport = {...viewport};
         if(data.canvas) canvas = {...canvas, ...data.canvas, viewport:localViewport};
         viewport = localViewport;
@@ -2121,9 +2115,14 @@ async function createSmartCanvas(){
 }
 function openSmartCanvasPage(id){
     if(!id) return;
-    const entryUrl = window.WorkbenchCanvasEntryCompatibility?.legacySmartCanvasUrl(id)
-        || `/static/smart-canvas.html?id=${encodeURIComponent(id)}`;
-    window.location.href = `${entryUrl}&v=2026.05.22.1`;
+    const entryUrl = window.WorkbenchCanvasEntryCompatibility?.legacySmartCanvasUrl(id, window.location.search);
+    if(!entryUrl) return;
+    const handoffUrl = new URL(entryUrl, window.location.origin);
+    const handoffParams = new URLSearchParams(window.location.search);
+    handoffParams.set('id', id);
+    handoffParams.set('v', '2026.05.22.1');
+    handoffUrl.search = handoffParams.toString();
+    window.location.href = `${handoffUrl.pathname}${handoffUrl.search}`;
 }
 function toggleEmojiPicker(id, event){
     event?.preventDefault();
@@ -2234,13 +2233,12 @@ async function setCanvasTitle(id, title){
 async function openCanvas(id){
     setStatus('Opening...');
     try {
-        const res = await fetch(`/api/canvases/${id}`);
-        if(!res.ok) throw new Error(tr('canvas.openFailed'));
-        const data = await res.json();
+        const data = await window.WorkbenchCanvasPersistence.load(id);
+        if(!data.ok) throw new Error(tr('canvas.openFailed'));
         resetCascadeRuntimeState();
         canvas = data.canvas;
         rememberCanvasListProject(canvas.project || 'default');
-        if(window.WorkbenchCanvasEntryCompatibility?.requiresLegacySmartHandoff(canvas) || (!window.WorkbenchCanvasEntryCompatibility && (canvas.kind || 'classic') === 'smart')){
+        if(window.WorkbenchCanvasEntryCompatibility.requiresLegacySmartHandoff(canvas)){
             openSmartCanvasPage(canvas.id);
             return;
         }
@@ -2355,9 +2353,8 @@ async function refreshMissingCanvasAssets(){
 async function syncRemoteCanvasNow(){
     if(!canvas) return;
     try {
-        const res = await fetch(`/api/canvases/${canvas.id}`);
-        if(!res.ok) throw new Error(tr('canvas.openFailed'));
-        const data = await res.json();
+        const data = await window.WorkbenchCanvasPersistence.load(canvas.id);
+        if(!data.ok) throw new Error(tr('canvas.openFailed'));
         const remote = data.canvas;
         if(Number(remote?.updated_at || 0) >= Number(lastCanvasUpdatedAt || 0)){
             applyRemoteCanvasData(remote);
@@ -2368,39 +2365,33 @@ async function syncRemoteCanvasNow(){
     }
 }
 async function checkRemoteCanvasVersion(){
-    if(!canvas || applyingRemoteCanvas || remoteSyncBusy) return;
-    if(document.hidden) return;
-    remoteSyncBusy = true;
-    try {
-        const res = await fetch(`/api/canvases/${canvas.id}/meta`);
-        if(!res.ok) throw new Error('meta failed');
-        const meta = await res.json();
-        const remoteUpdatedAt = Number(meta.updated_at || 0);
-        if(remoteUpdatedAt > Number(lastCanvasUpdatedAt || 0)){
-            await syncRemoteCanvasNow();
-        }
-    } catch(e) {
-        // 轮询失败不打扰创作；下一轮会重试。
-    } finally {
-        remoteSyncBusy = false;
+    return ensureCanvasRemoteSync().check();
+}
+function ensureCanvasRemoteSync(){
+    if(!canvasRemoteSync){
+        canvasRemoteSync = window.WorkbenchCanvasRemoteSync.create({
+            canvasId:() => canvas?.id,
+            currentUpdatedAt:() => lastCanvasUpdatedAt,
+            isEligible:() => Boolean(canvas && !applyingRemoteCanvas && !document.hidden),
+            onNewer:() => syncRemoteCanvasNow(),
+            intervalMs:2500,
+        });
     }
+    return canvasRemoteSync;
 }
 function startCanvasRemotePolling(){
     stopCanvasRemotePolling();
-    remoteSyncInterval = setInterval(checkRemoteCanvasVersion, 2500);
+    ensureCanvasRemoteSync().start();
 }
 function stopCanvasRemotePolling(){
-    if(remoteSyncInterval){
-        clearInterval(remoteSyncInterval);
-        remoteSyncInterval = null;
-    }
+    canvasRemoteSync?.stop();
+    canvasRemoteSync = null;
 }
 function handleCanvasUpdatedMessage(data){
-    if(!canvas || !data || data.type !== 'canvas_updated') return;
-    if(data.client_id && data.client_id === CLIENT_ID) return;
-    if(data.canvas_id !== canvas.id) return;
-    const remoteUpdatedAt = Number(data.updated_at || 0);
-    if(remoteUpdatedAt && remoteUpdatedAt <= Number(lastCanvasUpdatedAt || 0)) return;
+    const update = window.WorkbenchCanvasUpdateMessage.newerForCanvas(data, {
+        canvasId:canvas?.id, clientId:CLIENT_ID, currentUpdatedAt:lastCanvasUpdatedAt,
+    });
+    if(!update) return;
     clearTimeout(saveTimer);
     saveTimer = null;
     localCanvasDirty = false;
@@ -6495,7 +6486,7 @@ function isNodeDragSurface(target){
     return !isNodeControl(target) && !target.closest('.port, .resize-handle, .output-img-wrap');
 }
 function canUseCanvasMediaRenderer(node){
-    const enabled = new URLSearchParams(window.location.search).get('media_renderer') === '1';
+    const enabled = new URLSearchParams(window.location.search).get('media_renderer') !== '0';
     if(!enabled || !window.WorkbenchNodeClient?.isLoopback?.() || !window.WorkbenchMediaRenderer) return false;
     if(node?.type === 'image') return Boolean(node.url);
     return node?.type === 'group' && (node.items || []).some(id => {
@@ -6505,7 +6496,7 @@ function canUseCanvasMediaRenderer(node){
 }
 function canvasNodeShellBaseEnabled(){
     const params = new URLSearchParams(window.location.search);
-    return params.get('node_shell') === '1'
+    return params.get('node_shell') !== '0'
         && window.WorkbenchNodeClient?.isLoopback?.()
         && window.WorkbenchNodeShell
         && window.WorkbenchUnifiedRenderHost;
@@ -6513,13 +6504,13 @@ function canvasNodeShellBaseEnabled(){
 function canvasNodeShellEnabled(){
     const params = new URLSearchParams(window.location.search);
     return canvasNodeShellBaseEnabled()
-        && params.get('media_renderer') === '1'
+        && params.get('media_renderer') !== '0'
         && window.WorkbenchMediaRenderer;
 }
 function canvasLegacyRendererEnabled(){
     const params = new URLSearchParams(window.location.search);
     return canvasNodeShellBaseEnabled()
-        && params.get('legacy_renderer') === '1'
+        && params.get('legacy_renderer') !== '0'
         && window.WorkbenchLegacyRenderer;
 }
 function canUseCanvasNodeShellForMedia(node){
@@ -15521,13 +15512,7 @@ async function exportSelectedWorkflow(includeResources=false){
             return;
         }
         const filename = workflowFilename('zip');
-        const res = await fetch('/api/canvas-workflows/export', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({...payload, include_resources:true, filename})
-        });
-        if(!res.ok) throw new Error(await responseErrorMessage(res, '导出工作流失败'));
-        const blob = await res.blob();
+        const blob = await window.WorkbenchCanvasWorkflowTransfer.exportArchive(payload, filename);
         downloadBlob(blob, filename);
         setStatus('已导出包含资源的工作流包');
     } catch(err) {
@@ -15651,11 +15636,7 @@ function insertWorkflowIntoCanvas(imported){
 async function importWorkflowFile(file){
     if(!canvas || !file) return;
     try {
-        const form = new FormData();
-        form.append('file', file);
-        const res = await fetch('/api/canvas-workflows/import', {method:'POST', body:form});
-        if(!res.ok) throw new Error(await responseErrorMessage(res, '导入工作流失败'));
-        const data = await res.json();
+        const data = await window.WorkbenchCanvasWorkflowTransfer.importArchive(file);
         insertWorkflowIntoCanvas(normalizeImportedWorkflow(data));
         closeWorkflowTransferModal();
     } catch(err) {

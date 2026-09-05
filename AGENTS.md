@@ -1,17 +1,21 @@
-# AI Workbench Repository Rules
+# AI Workbench Repository Rules — V2.2.1
 
 ## Purpose
 
-This repository incrementally evolves `GUOXIAOLUO/canvas` into a generic AI Workbench.
+This repository incrementally evolves the existing Xinhuabu/Canvas application into a generic AI Workbench.
+
 It is not a greenfield rewrite.
 
 Target:
 
-**AI Workbench Core + Codex Harness + dynamic Workbench Skills + user-selectable Models + explicit Provider Connections + pluggable Executors + versioned project data + installable Packages.**
+> **Unified Canvas + Workbench-owned project/resources + Codex Harness default Agent runtime + user-selectable model routes + pluggable Executors + Integration runtime + installable Packages.**
 
-WholeHouse is the first deep Industry Package, not the Core.
+V1:
 
-V1 is Web UI first.
+- Web UI first;
+- macOS first;
+- Apple Silicon / arm64 primary;
+- WholeHouse is the first deep Industry Package.
 
 ---
 
@@ -25,7 +29,7 @@ Before architecture or behavior changes, read:
 4. `TARGET_ARCHITECTURE.md`
 5. `MIGRATION_PLAN.md`
 6. `IMPLEMENTATION_PLAN.md`
-7. affected source files and tests
+7. affected source/tests
 
 Authority:
 
@@ -34,11 +38,9 @@ Authority:
 - `TARGET_ARCHITECTURE.md` = target contracts;
 - `CURRENT_ARCHITECTURE.md` = current implementation facts;
 - `IMPLEMENTATION_PLAN.md` = Round/Gate order;
-- `CURRENT_EXECUTION_STATUS.md` = currently authorized Round.
+- `CURRENT_EXECUTION_STATUS.md` = only currently authorized Round.
 
-If `CURRENT_ARCHITECTURE.md` contradicts live source/tests, update it in the same Round that verifies the contradiction.
-
-Do not infer the active Round from historical prose.
+Planning edits do not authorize future Round implementation.
 
 ---
 
@@ -48,24 +50,27 @@ Do not infer the active Round from historical prose.
 
 Core may own generic:
 
-- Project / Canvas / authorization / audit
-- Node / Edge / Group
+- Project / Workspace / authorization / audit
+- Canvas / Node / Edge / Group
+- Prompt / Workbench Skill / definition resolution
 - Asset / Artifact / Collection
+- Catalog
 - Entity / Relation
 - Knowledge
-- Workbench Skill / Definition resolution
 - Provider / Model / ModelAvailability
 - Execution
 - Workflow / Approval / Handoff
-- MCP / Tool runtime
-- CodexBridge
-- Package / WorkspaceProfile runtime
+- Integration
+- Codex runtime adapter
+- Package runtime
 
 WholeHouse business implementation belongs under:
 
-`packages/wholehouse/`
+```text
+packages/wholehouse/
+```
 
-Core must start and support useful general work without WholeHouse.
+Core must remain useful without WholeHouse.
 
 ---
 
@@ -73,719 +78,548 @@ Core must start and support useful general work without WholeHouse.
 
 ```text
 Node
+≠ Prompt
 ≠ Workbench Skill
 ≠ Model
 ≠ ProviderDefinition
 ≠ ProviderConnection
 ≠ ModelAvailability
-≠ ExecutionProfile / Executor
+≠ ExecutionRoute
+≠ ExecutionProfile
+≠ Executor
+≠ Asset
 ≠ Artifact
+≠ CatalogEntry
+≠ Entity
 ```
 
-Definitions:
-
-- Workbench Skill = reusable work/method contract.
-- Model = model identity and capabilities.
-- ProviderDefinition = provider/protocol adapter type.
-- ProviderConnection = one configured user/workspace connection/account/endpoint.
-- ModelAvailability = one executable route from a Model through a ProviderConnection and compatible Executor.
-- ExecutionProfile = user-facing execution mode supported by a Skill.
-- Executor = runtime mechanism that performs a run.
-- Artifact = versioned produced result.
-- Node = one visual work instance.
-
-Do not make provider/model/executor identity a permanent Node type.
+Do not make provider/model/executor/industry identity a permanent Node type.
 
 ---
 
-## 3. Codex has two separate roles
-
-### Harness role
-
-Codex Harness / App Server is the primary Agent/orchestration runtime target.
-
-Workbench product code depends on a stable `CodexBridge`, not raw App Server/subprocess/protocol details.
-
-### Model role
-
-Models discovered through Codex/OpenAI are ordinary ModelRegistry/ModelAvailability choices.
-
-The Agent's own model does not force child Node models.
-
-Do not create a permanent "Codex model Node".
-
----
-
-## 4. Workbench Skill is not Codex Skill
-
-A Workbench Skill is the product-level capability definition.
-
-A Codex `SKILL.md` is one possible implementation used by one `codex_harness` ExecutionProfile.
-
-The same Workbench Skill may support Codex Harness, direct model API, script, ComfyUI, or another compatible executor without changing Skill identity.
-
----
-
-## 5. One business-neutral Unified Canvas
+## 3. One business-neutral Unified Canvas
 
 Target:
 
-`CanvasRecord + NodeRecord + EdgeRecord + NodeShell + RendererRegistry + DefinitionResolver`
+```text
+CanvasRecord
++ NodeRecord
++ EdgeRecord
++ NodeShell
++ RendererRegistry
++ DefinitionResolver
+```
 
-Canvas understands graph/interaction/state, not WholeHouse meaning.
+Classic/Smart are migration sources, not permanent modes.
 
-Do not add a third Canvas.
-
-Classic/Smart are migration sources, not permanent product modes.
-
-Legacy capability may remain through adapters after duplicate Canvas runtime removal.
-
----
-
-## 6. Finite renderer vocabulary
-
-Default renderer families:
-
-- media
-- document
-- analysis
-- task
-- entity
-- form
-- table
-- comparison
-- approval
-- composite
-- legacy
-
-New Skills normally reuse an existing renderer.
-
-Adding a new renderer family requires architecture justification/proposal if the existing vocabulary can plausibly serve the requirement.
+Do not add another industry Canvas.
 
 ---
 
-## 7. One definition resolution boundary
+## 4. One definition resolution boundary
 
-All Node creation resolves `definition_ref` through one generic `DefinitionResolver` or equivalent composite boundary.
+All new definition-backed creation resolves through one `DefinitionResolver` or equivalent composite boundary.
 
-It may delegate to:
+Delegates may include:
 
+- PromptRegistry
 - SkillRegistry
 - LegacyDefinitionRegistry
-- Entity definition registry
-- Workflow/composite definition registry
-- Package historical DefinitionSnapshots
+- Entity definitions
+- Workflow/composite definitions
+- Package DefinitionSnapshots
 
-`NodeCreationService` must not branch on package/business/provider IDs.
-
----
-
-## 8. One creation/mutation boundary
-
-Migrated creation uses:
-
-- `NodeCreationService`
-- `GraphMutationService` for atomic graph changes
-
-Migrated edits use `NodeMutationService` or equivalent validated application boundary.
-
-Creation/mutation must support applicable:
-
-- authorization
-- expected revision
-- validation
-- idempotency
-- audit
-- stale-write rejection
-- outdated propagation
-
-Do not add direct raw node/project JSON or DOM-based domain mutation paths.
+`NodeCreationService` must not branch on package/business/provider/Codex IDs.
 
 ---
 
-## 9. One compatibility resolver
+## 5. One creation/mutation boundary
 
-Human and Agent flows use the same compatibility logic.
+Migrated creation/mutation uses:
 
-Compatibility may consider:
+- NodeCreationService;
+- NodeMutationService;
+- GraphMutationService.
 
-- Port/Data type
-- cardinality
-- Skill/Package enabled state
-- permissions
-- model capability/availability
-- executor availability
-- project state/policy
+No direct domain mutation through:
 
-This powers port highlighting, port drop to blank Canvas, "Use it next", dynamic toolbar, Command-K suggestions and Agent Skill selection.
+- DOM;
+- raw Canvas JSON;
+- raw SQLite;
+- provider callback;
+- Agent tool bypass.
 
-Do not hard-code provider-specific or WholeHouse-specific next-step menus into Canvas Core.
-
----
-
-## 10. Port/Data contracts are explicit
-
-Do not keep `input_bindings` as an indefinitely untyped bag.
-
-Target binding categories include:
-
-- AssetVersion
-- ArtifactVersion
-- EntityRef / EntityVersion
-- Collection
-- literal/config input
-
-KnowledgeSnapshot normally belongs to execution context unless a Skill explicitly declares a Knowledge input contract.
-
-Use `PortTypeRegistry`, not an Artifact-only registry, because ports can carry Asset, Artifact, Entity and Collection references.
+Applicable writes enforce authorization, expected revision, validation, idempotency/audit and stale-write rejection.
 
 ---
 
-## 11. Group != Collection != ExecutionPolicy
+## 6. One CompatibilityResolver
+
+Human UI, Workflow and Agent use the same compatibility logic.
+
+No provider-specific or WholeHouse-specific next-step logic in Canvas Core.
+
+---
+
+## 7. Port/Data contracts are explicit
+
+Do not keep `input_bindings` indefinitely untyped.
+
+Target binding categories:
+
+- AssetVersion;
+- ArtifactVersion;
+- EntityRef / EntityVersion;
+- Collection;
+- literal/config.
+
+Use `PortTypeRegistry`.
+
+---
+
+## 8. Group != Collection != ExecutionPolicy
 
 - Group = Canvas visual organization.
-- Collection = typed multi-item data semantics.
-- ExecutionPolicy = batch/loop/retry/parallel semantics.
-
-Legacy Loop remains compatible, but new batch behavior converges on ExecutionPolicy.
+- Collection = typed multi-item data.
+- ExecutionPolicy = batch/retry/parallel semantics.
 
 ---
 
-## 12. No silent runtime substitution
+## 9. Prompt is a first-class resource
 
-Model selection precedence:
+Prompt is not merely a file inside a Skill.
 
-1. current Node user choice
-2. user's Skill default
-3. Workspace/System user default
+Target:
 
-The system may filter and recommend.
+- PromptDefinition;
+- PromptVersion;
+- PromptRegistry.
 
-It must not silently replace:
-
-- Model
-- ProviderConnection / ModelAvailability
-- ExecutionProfile / Executor
-
-Unavailable selected routes surface an explicit actionable state.
-
-Formal provenance records requested and actual selections.
+Prompt may be used by Codex, direct APIs, Workflows and media executors.
 
 ---
 
-## 13. NodeRecord v1 migration contracts
+## 10. Workbench Skill != Codex Skill
 
-Current NodeRecord v1 remains the migration basis until explicitly proposed otherwise.
+Workbench Skill = product capability.
 
-### Execution selection
+Codex `SKILL.md` = optional implementation for a `codex_harness` ExecutionProfile.
 
-Until R8 proves the execution contract:
+The same Workbench Skill may support multiple executor routes.
 
-```json
-{
-  "workbench.execution": {
-    "profile_id": "codex-deep",
-    "executor_type": "codex_harness",
-    "runtime_connection_id": null
-  }
-}
+Do not copy Workbench Skills into the user's global Codex home as the canonical implementation strategy.
+
+---
+
+## 11. Model / availability / execution remain separate
+
+ModelDefinition = model identity/capabilities.
+
+ModelAvailability = one currently usable route for that model.
+
+A route may be:
+
+```text
+provider
+runtime
 ```
 
-lives under `extensions`.
+Examples:
 
-### ModelAvailability selection
-
-Current NodeRecord v1 `ModelBinding` contains `provider_id + model_id`.
-
-During migration:
-
-- `model_id` continues to identify the selected Model.
-- `provider_id` remains the Legacy/provider-connection compatibility identifier required by v1.
-- canonical ModelAvailability identity is stored in a namespaced extension when needed.
-
-Example:
-
-```json
-{
-  "workbench.model_availability": {
-    "availability_id": "availability_01"
-  }
-}
+```text
+GPT-X · OpenAI API
+GPT-X · Codex Harness
 ```
 
-Do not silently reinterpret stored `provider_id` as a new incompatible concept.
-
-Promoting stable model/execution bindings into NodeRecord v2 requires a proposal.
+Codex is not a Model.
 
 ---
 
-## 14. State authorities are separated
+## 12. Codex has three roles
 
-Target separation:
+1. primary Agent/orchestration runtime;
+2. one node execution route;
+3. model discovery source.
 
-- `NodeState` = Canvas/task projection state.
-- `ExecutionRunState` = execution authority.
-- Artifact freshness = current/outdated.
-- Approval/Frozen = governance state on formal versions.
+The Agent's own model does not force child Node models.
 
-A Node may project `outdated` or `frozen`, but formal Artifact/Approval records are authoritative.
-
-Frozen applies to a formal version, not to mutable Node UI state itself.
+Codex-discovered models must be eligible to appear in the same Model Picker as direct-provider models.
 
 ---
 
-## 15. Node UX stays task-oriented
+## 13. No silent runtime substitution
 
-NodeShell converges on:
+Never silently replace:
 
-1. task/status
-2. inputs/collections
-3. primary content/result
-4. Skill / Model / Execution
-5. actions/output
+- Model;
+- ModelAvailability;
+- ProviderConnection / RuntimeConnection;
+- ExecutionProfile;
+- Executor.
 
-Advanced implementation details belong in Inspector.
-
-Intermediate ArtifactVersions may exist without visible Nodes and may be materialized on demand.
+Formal provenance records requested and actual selection.
 
 ---
 
-## 16. Project data is authoritative
+## 14. Codex version independence
 
-Project/domain persistence owns formal:
+Workbench must not require one exact Codex release version.
 
-- requirements/dimensions
-- Project/Canvas identity
-- structured Entities
-- Canvas graph
-- Assets/Artifacts
-- Knowledge snapshots
-- Workflow versions/runs
-- approvals/frozen versions
-- handoffs
-- audit
+Rules:
 
-Codex Threads own Agent session/conversation state, not formal project truth.
+- stable App Server APIs first;
+- recorded tested version = evidence/diagnostics;
+- official generated/validated schema preferred;
+- feature detection for optional behavior;
+- experimental API use is explicit;
+- a required V1 capability must have a non-experimental path or remain deferred;
+- do not branch business behavior on exact Codex version strings.
 
 ---
 
-## 17. Canonical persistence is explicit
+## 15. Codex integration stays behind a boundary
+
+Target:
+
+```text
+CodexRuntime
+├── CodexExecutableResolver
+├── AppServerProcess
+├── CodexProtocolClient
+├── CodexProtocolCompatibility
+├── CodexProjectionService
+├── CodexWorkbenchToolBridge
+└── CodexEventNormalizer
+```
+
+Core domain must not import raw Codex protocol DTOs.
+
+V1 transport is stdio.
+
+Do not make experimental App Server WebSocket transport a V1 requirement.
+
+---
+
+## 16. Codex is not business persistence
+
+Codex Threads/Projects own Agent runtime/session state.
+
+Workbench persistence owns formal:
+
+- Project/Canvas;
+- Assets/Artifacts;
+- Catalog;
+- Entities;
+- Knowledge;
+- Workflow;
+- Approval/Frozen;
+- Handoff;
+- Package history;
+- audit.
+
+If needed, use a lightweight `CodexSessionLink`.
+
+---
+
+## 17. Codex Auth is not duplicated by default
+
+Codex/ChatGPT authentication remains primarily managed by Codex App Server.
+
+Workbench CredentialRef is for Workbench-managed provider/integration credentials.
+
+---
+
+## 18. Codex runtime approval != Workbench business approval
+
+Codex runtime approval covers:
+
+- shell;
+- files;
+- network;
+- MCP/runtime permission.
+
+Workbench business approval covers:
+
+- design freeze;
+- product decision;
+- quote/decision approval;
+- CAD handoff approval.
+
+Agent/runtime cannot approve/freeze its own Workbench formal output.
+
+---
+
+## 19. WorkbenchToolContract is stable; transport adapters are replaceable
+
+Agent tools are defined as Workbench domain capabilities.
+
+Adapters may include:
+
+- MCP;
+- optional Dynamic Tools;
+- future Agent runtime adapters.
+
+Dynamic Tools must not be the only V1 path while experimental.
+
+All tools call Application Services.
+
+---
+
+## 20. Do not build another subagent framework
+
+Codex Harness owns its internal Agent loop/subagent behavior.
+
+Workbench owns business-level orchestration:
+
+- Project;
+- Skill;
+- Workflow;
+- GraphProposal;
+- Approval;
+- Artifact;
+- Handoff.
+
+---
+
+## 21. Project data is authoritative
+
+Project/domain persistence owns formal project truth.
+
+Codex Thread history is not a substitute.
+
+---
+
+## 22. Canonical persistence is explicit
 
 V1 structured authority target is SQLite behind repositories.
 
 Risky persistence changes use:
 
-`expand -> backfill -> compare -> compatibility -> controlled switch -> verify -> contract`
+```text
+expand
+-> backfill
+-> compare
+-> compatibility
+-> controlled switch
+-> verify
+-> contract
+```
 
-Do not leave new domain systems permanently authoritative in ad-hoc Legacy JSON.
+`CanvasRecord.revision` is logical concurrency authority.
 
-`CanvasRecord.revision` is a logical revision, not a timestamp alias.
-
-Changing the primary database strategy requires proposal approval.
-
----
-
-## 18. Legacy Project identity migration is explicit
-
-Legacy Canvas fields such as `project: "default"` and empty/unowned `owner` must map through an explicit migration policy.
-
-Do not invent ownership silently during migration.
-
-R3 must define the local workspace actor/default project mapping before authority switch.
+Canonical expected-revision write must not reread a newer revision and authorize stale payload.
 
 ---
 
-## 19. Authorization is action-based
-
-Current `can_edit(...)` behavior may remain as compatibility.
-
-Target authorization is action/resource based, for example:
-
-- project.read
-- canvas.edit
-- execution.run
-- artifact.write
-- entity.edit
-- knowledge.manage
-- approval.decide
-- handoff.export
-- provider.manage
-- package.manage
-
-Codex tools receive least-privilege project-scoped capabilities.
-
----
-
-## 20. Asset, Artifact, Entity and Knowledge are distinct
+## 23. Asset / Artifact / Catalog / Entity / Knowledge are distinct
 
 - Asset = owned file/blob/version.
 - Artifact = produced result/version.
-- Entity = structured formal project fact/relation.
-- Knowledge = interpreted/reference information + retrieval snapshot.
+- Catalog = organized reusable reference/product entries.
+- Entity = structured formal project fact.
+- Knowledge = interpreted/reference information and reproducible retrieval snapshot.
 
-Do not collapse them into one JSON/vector abstraction.
-
-Formal Entity updates produce immutable EntityVersions.
-
----
-
-## 21. Workflow/provenance/approval are versioned
-
-Formal output provenance captures applicable:
-
-- Node/revision
-- Skill/version
-- Model
-- ProviderConnection / ModelAvailability
-- ExecutionProfile / Executor
-- RuntimeConnection
-- parameters
-- input/Asset versions
-- Entity versions
-- KnowledgeSnapshot
-- WorkflowVersion
-- parent version
-- actor/timestamp
-- usage
-
-Dependency changes mark prior formal outputs outdated; history remains.
-
-Formal frozen output requires authorized human approval.
-
-Agent/runtime may request approval but cannot approve/freeze its own output.
+Do not collapse them into one generic JSON/vector record.
 
 ---
 
-## 22. Agent mutation is proposal-first
+## 24. Workflow/provenance/approval are versioned
 
-Agent graph changes use a domain record such as `GraphProposal`.
+Formal provenance records applicable:
 
-Ghost nodes are UI projections, not formal NodeRecords.
-
-Proposal application must verify `base_revision`.
-
-If Canvas/project state changed, the proposal becomes stale and must be recomputed/rebased or re-confirmed; it is not auto-applied.
-
----
-
-## 23. Audit and domain mutation should be atomic
-
-For canonical persistence, domain mutation and its durable audit/outbox record should commit atomically whenever they belong to the same transaction.
-
-Do not treat "persist succeeded, audit append failed" as a successful canonical mutation.
-
----
-
-## 24. Package history is independently resolvable
-
-Package kinds:
-
-- system
-- common
-- industry
-
-WholeHouse is industry.
-
-Historical projects must not depend solely on currently installed package folders.
-
-Use a `ProjectPackageLock` and/or immutable `DefinitionSnapshot` sufficient to resolve historical `definition_ref` values.
-
-WorkspaceProfile is an experience layer only; it does not bypass authorization or remove compatible general capabilities.
+- Node/revision;
+- Prompt/version;
+- Skill/version;
+- Model;
+- ModelAvailability;
+- route/connection;
+- ExecutionProfile/Executor;
+- input versions;
+- Entity versions;
+- KnowledgeSnapshot;
+- WorkflowVersion;
+- actor/timestamps/usage.
 
 ---
 
-## 25. MCP tool use is not automatically MCPExecutor
+## 25. Agent mutation is proposal-first
 
-Distinguish:
+Agent graph changes use `GraphProposal`.
 
-- Codex/Agent invoking MCP tools inside an Agent loop
-- a Workbench Skill whose execution route is a direct MCP action
+Application verifies `base_revision`.
 
-These are separate semantics even if they share MCP infrastructure.
-
----
-
-## 26. Executor endpoints are explicit
-
-Executor type is not enough for multi-instance runtimes.
-
-Examples:
-
-- ComfyUI Mac mini
-- GPU workstation
-- RunningHub account
-
-ExecutionProfile/executor configuration resolves through typed RuntimeConnections/ExecutorEndpoints rather than arbitrary UI strings.
+Stale proposals are recomputed/rebased/reconfirmed rather than auto-applied.
 
 ---
 
-## 27. Skill and ExecutionProfile requirements merge predictably
+## 26. Package history is independently resolvable
 
-Effective requirements are:
+Use `ProjectPackageLock` / `DefinitionSnapshot`.
 
-`Skill base requirements + ExecutionProfile additional/narrowing requirements`
-
-A profile may add or narrow requirements.
-
-It must not silently relax mandatory Skill capabilities or permissions.
+Historical project readability must not depend only on currently installed package folders.
 
 ---
 
-## 28. Capability vocabulary is versioned
+## 27. Integration is generic
 
-Use one Core capability vocabulary such as:
+Use:
 
-`workbench.capability/1`
+- IntegrationDefinition;
+- IntegrationConnection;
+- IntegrationRegistry.
 
-Provider adapters normalize provider-specific names into this vocabulary.
+Mechanisms may include:
 
----
+- Native API;
+- MCP;
+- Local Bridge;
+- File Handoff;
+- Webhook;
+- CLI;
+- Human Handoff.
 
-## 29. Codex App Server integration rules
-
-When implementing App Server:
-
-- inspect installed/target Codex version
-- inspect official schema/protocol for that version
-- record/pin the tested version
-- prefer generated/validated bindings
-- treat transport as Codex JSON-RPC-lite framed as JSONL over stdio
-- isolate raw protocol behind `CodexBridge`
-- preserve `codex exec` compatibility until separately removed
-- normalize events/approvals into Workbench contracts
-- never persist raw protocol payloads as domain truth
-
-Changing the App Server integration contract requires a proposal.
-
-### R1 launch policy
-
-R1 proves transport/runtime integration, not unrestricted Agent authority.
-
-R1 must define:
-
-- bounded working directory
-- environment/secret filtering
-- shell/filesystem policy
-- destructive approval policy
-- timeout/cancellation
-- no Workbench project mutation tools
+Codex Apps/MCP are projected where useful rather than reimplemented.
 
 ---
 
-## 30. Secrets/security
+## 28. macOS-first, Core portable
 
-Secrets remain backend-only.
+V1 official runtime/product target is macOS, Apple Silicon first.
 
-Never expose/persist/log raw provider secrets in browser/Canvas/Node/fixtures.
+macOS-specific code belongs in infrastructure adapters.
 
-For changed surfaces check applicable:
+Do not inject macOS APIs into Core domain/application contracts when avoidable.
 
-- authentication
-- project authorization/roles
-- CORS/CSRF
-- path/symlink containment
-- upload/archive safety
-- SSRF/network policy
-- secret redaction
-- subprocess/tool scope
-- timeout/cancel
-- destructive confirmation
-- audit
-- stale-write/concurrency behavior
-
-LAN mode is not authenticated multi-user support unless those controls exist.
+Windows support is future work.
 
 ---
 
-## 31. Legacy compatibility
+## 29. Runtime is repository-independent
 
-Until replacement Gates pass preserve:
+Workbench runtime must not depend on a Git repository address.
 
-- current Canvas JSON readability
-- required Classic/Smart compatibility paths
-- provider execution
-- ComfyUI
-- RunningHub
-- Prompt/LLM/Loop/Group/fixed-node behavior
-- unknown Legacy fields
-- current `codex exec`
+Do not add:
 
-Do not delete a Legacy node family without proposal/evidence.
+- GitHub raw/tree URLs;
+- source-repository update code;
+- product startup dependency on Git hosting.
 
-Use strangler/adapters, not a big-bang rewrite.
+Legacy self-update logic should be removed, not retargeted.
+
+GitHub can remain external development/CI infrastructure.
 
 ---
 
-## 31A. Legacy monolith responsibility freeze
+## 30. Legacy monolith responsibility freeze
 
-The following files are Legacy compatibility surfaces:
+Legacy compatibility surfaces:
 
 - `main.py`
 - `static/js/canvas.js`
 - `static/js/smart-canvas.js`
 
-From this point forward:
+may retain compatibility behavior, delegate, wire and shrink.
 
-> **Legacy monoliths may lose responsibility, but they must not gain new Workbench business responsibility.**
+They must not become primary implementation locations for new:
 
-They may:
+- Prompt;
+- SkillRegistry;
+- Catalog;
+- Provider/Model;
+- Execution;
+- Integration;
+- Asset/Entity/Knowledge/Workflow;
+- Package;
+- WholeHouse;
+- Codex domain tooling.
 
-- retain existing Legacy behavior during a verified migration window;
-- call new application/domain/runtime services;
-- host narrowly scoped compatibility adapters;
-- perform bootstrap/composition/wiring;
-- delegate page-level events into shared Workbench modules;
-- shrink as responsibilities move behind stable boundaries.
-
-They must not become the primary implementation location for any new Workbench capability.
-
-New capabilities must be implemented in the appropriate modular boundary first, including:
-
-- SkillRegistry / DefinitionResolver;
-- ProviderRegistry / ProviderConnection / ModelRegistry / ModelAvailability;
-- ExecutionProfile / ExecutorRegistry / ExecutionRuntime;
-- Asset / Artifact / Entity / Knowledge runtime;
-- Workflow / Approval / Handoff runtime;
-- PackageRuntime / WorkspaceProfile;
-- CodexBridge / Agent orchestration;
-- WholeHouse or other Package behavior.
-
-Do not implement a new capability in a Legacy monolith with the intention of "moving it later".
-
-### Backend target
-
-`main.py` should progressively converge toward:
+Backend target for `main.py`:
 
 ```text
 create_app()
 register_routes()
 wire_services()
-startup / shutdown
+startup/shutdown
 narrow compatibility bootstrap
 ```
 
-New backend business logic should live under appropriate `workbench/` or `packages/` modules.
+---
 
-`main.py` may import and register new routes/services, but it should not contain the primary implementation of those capabilities.
+## 31. Feature flags have a removal Gate
 
-### Frontend target
+Every migration flag records:
 
-New shared Workbench/Canvas behavior should live under modular shared boundaries such as:
+- introduced Round;
+- purpose;
+- default;
+- removal Gate.
 
-`static/js/workbench/...`
-
-or a later approved replacement frontend boundary.
-
-Do not add new Workbench business branches to:
-
-- `static/js/canvas.js`
-- `static/js/smart-canvas.js`
-
-Those files may delegate to shared modules while their responsibility shrinks.
-
-### Round audit requirement
-
-Every implementation Round must report a **Legacy responsibility delta**:
-
-- Did `main.py` gain any new Workbench business responsibility?
-- Did `static/js/canvas.js` gain any new Workbench business responsibility?
-- Did `static/js/smart-canvas.js` gain any new Workbench business responsibility?
-- Which responsibilities moved out of Legacy monoliths?
-
-Expected result for the first three questions is **No**, unless an approved proposal explicitly documents a temporary compatibility exception and removal Gate.
-
-A net increase in Legacy monolith responsibility is a Gate failure by default.
+After Gate completion, remove obsolete branch/flag.
 
 ---
 
-# Development rules
+## 32. Security
 
-## 32. Gate method
+Secrets stay backend-only.
 
-Before implementation:
+For changed surfaces check applicable:
 
-1. inspect HEAD/worktree
-2. read current status
-3. inspect affected code/tests
-4. state compatibility contract
-5. state non-goals
-6. list expected files
-7. identify focused tests
-8. identify proposal-required changes
+- authentication;
+- authorization;
+- CORS/CSRF;
+- path/symlink containment;
+- upload/archive safety;
+- SSRF/network policy;
+- secret redaction;
+- subprocess/tool scope;
+- timeout/cancel;
+- destructive confirmation;
+- audit;
+- stale-write/concurrency.
 
-During implementation:
-
-- smallest seam first
-- preserve unrelated changes
-- no broad high-risk reformat
-- no duplicate domain path
-- typed/versioned public boundaries
-- structured errors
-- secret-safe logging
-- feature flags at service/runtime boundaries
-
-After implementation:
-
-1. focused tests
-2. baseline tests
-3. syntax/static checks
-4. browser acceptance where applicable
-5. Legacy load/save verification where applicable
-6. update `CURRENT_EXECUTION_STATUS.md`
-7. update `CURRENT_ARCHITECTURE.md` when verified facts changed
-8. update plan facts only when verified
-9. record exact next authorized Round + forbidden next actions
-
-Do not execute multiple architecture Rounds in one task.
+LAN mode is not authenticated multi-user support unless explicitly implemented.
 
 ---
 
-## 33. Proposal-required decisions
+## 33. Platform Engineering is cross-round
 
-Write a proposal before:
+New work should progressively converge on:
 
-- frontend framework replacement
-- primary database strategy replacement
-- incompatible NodeRecord change
-- Codex App Server contract change
-- Legacy node family deletion
-- early Canvas compatibility removal
-- large infrastructure dependency
-- Agent auto-mutation by default
-- Industry behavior in Core
-- unjustified new renderer family
+- Typed Settings;
+- MigrationRunner;
+- BlobStore;
+- Durable Events;
+- Backup/Restore;
+- Schema/OpenAPI;
+- CI/quality checks;
+- Architecture Guards.
 
-Proposal includes:
-
-- Problem
-- Constraints
-- Options
-- Recommendation
-- Migration Cost
-- Compatibility Impact
-- Security Impact
-- Rollback
-- Acceptance Criteria
+Do not overbuild infrastructure before its owning Round/Gate.
 
 ---
 
-## 34. Definition of Done
+## 34. Architecture guards
 
-Applicable items must pass:
+Add automated guards when practical for:
 
-- requested behavior complete
-- Core/Package separation holds
-- Skill/Model/ProviderConnection/Executor/Artifact separation holds
-- persistence authority explicit
-- schemas/contracts versioned where required
-- compatibility tested or approved break documented
-- security checks complete
-- focused/baseline/static tests pass
-- browser acceptance recorded where applicable
-- docs/status match verified code
-- no secret leak
-- no accidental generated artifacts
-- current Gate acceptance criteria verified
-- Legacy responsibility delta reviewed and no unapproved monolith growth occurred
+- WholeHouse imports/branches in Core;
+- provider-specific Canvas branches;
+- Codex protocol DTO imports in Core;
+- Agent raw DB/JSON/DOM mutation;
+- new business logic in Legacy monoliths;
+- runtime Git repository URL dependencies;
+- required V1 feature that only works via experimental Codex API.
 
-Do not mark a Gate complete merely because code exists.
+---
+
+# Round discipline
+
+Only `docs/status/CURRENT_EXECUTION_STATUS.md` authorizes the active Round.
+
+If R4 is active:
+
+- finish R4;
+- planning documents may be updated;
+- do not start R5-R17 implementation.
+
+Partial completion is not permission to skip Gates.

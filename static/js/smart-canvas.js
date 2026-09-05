@@ -81,8 +81,9 @@ let canvasUsesConnections = true;
 let nodes = [];
 let selectedId = '';
 let selectedIds = [];
-// Opt-in generic runtime; Smart Canvas remains the renderer and storage adapter.
-const smartUnifiedRuntimeEnabled = params.get('unified_canvas') === '1' && Boolean(window.WorkbenchCanvasRuntime);
+// Default-on generic runtime; explicit zero remains the bounded U7 rollback
+// control while Smart Canvas remains the renderer and storage adapter.
+const smartUnifiedRuntimeEnabled = params.get('unified_canvas') !== '0' && Boolean(window.WorkbenchCanvasRuntime);
 let smartUnifiedRuntime = null;
 function smartRuntimeGeometry(){
     return nodes.map(node => {
@@ -966,13 +967,7 @@ async function exportSelectedSmartWorkflow(includeResources=false){
             smartWorkflowExportMeta.textContent = '正在打包资源...';
         }
         const filename = smartWorkflowFilename('zip');
-        const res = await fetch('/api/canvas-workflows/export', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({...payload, include_resources:true, filename})
-        });
-        if(!res.ok) throw new Error(await responseErrorMessage(res, '导出工作流失败'));
-        downloadBlob(await res.blob(), filename);
+        downloadBlob(await window.WorkbenchCanvasWorkflowTransfer.exportArchive(payload, filename), filename);
         if(smartWorkflowExportMeta){
             smartWorkflowExportMeta.classList.remove('busy');
             smartWorkflowExportMeta.classList.add('success');
@@ -1025,11 +1020,7 @@ async function importSmartWorkflowFile(file){
     if(!canvas || !file) return;
     try {
         if(smartWorkflowTransferSub) smartWorkflowTransferSub.textContent = '正在导入工作流...';
-        const form = new FormData();
-        form.append('file', file);
-        const res = await fetch('/api/canvas-workflows/import', {method:'POST', body:form});
-        if(!res.ok) throw new Error(await responseErrorMessage(res, '导入工作流失败'));
-        const data = await res.json();
+        const data = await window.WorkbenchCanvasWorkflowTransfer.importArchive(file);
         insertSmartWorkflowIntoCanvas(normalizeImportedSmartWorkflow(data));
         closeSmartWorkflowTransferModal();
     } catch(err) {
@@ -1580,19 +1571,19 @@ function canUseVersionedSmartImageCreation(){
     return Boolean(window.WorkbenchNodeClient?.isLoopback?.() && window.WorkbenchNodeClient?.isEnabled?.() && canvas?.id && canvas?.project);
 }
 function canUseNodeShellForSmartGroup(node){
-    const enabled = new URLSearchParams(window.location.search).get('node_shell') === '1';
+    const enabled = new URLSearchParams(window.location.search).get('node_shell') !== '0';
     return Boolean(enabled && window.WorkbenchNodeClient?.isLoopback?.() && window.WorkbenchNodeShell && window.WorkbenchLegacyRenderer && node?.type === 'smart-group');
 }
 function canUseNodeShellForSmartLegacy(node){
     const params = new URLSearchParams(window.location.search);
-    const enabled = params.get('node_shell') === '1' && params.get('legacy_renderer') === '1';
+    const enabled = params.get('node_shell') !== '0' && params.get('legacy_renderer') !== '0';
     // Media and Smart Group have dedicated adapters. Everything admitted by
     // this seam remains a lossless Legacy DOM payload; this page adapter does
     // not choose a renderer based on an individual node family.
     return Boolean(enabled && window.WorkbenchNodeClient?.isLoopback?.() && window.WorkbenchNodeShell && window.WorkbenchLegacyRenderer && node && !isSmartImageNode(node) && !isSmartGroupNode(node) && node.type !== 'group');
 }
 function canUseMediaRendererForSmartImage(node){
-    const enabled = new URLSearchParams(window.location.search).get('media_renderer') === '1';
+    const enabled = new URLSearchParams(window.location.search).get('media_renderer') !== '0';
     return Boolean(enabled && window.WorkbenchNodeClient?.isLoopback?.() && window.WorkbenchNodeShell && window.WorkbenchMediaRenderer && isSmartImageNode(node) && (node.images || []).length);
 }
 function smartGroupMediaRecord(node){
@@ -1603,7 +1594,7 @@ function smartGroupMediaRecord(node){
     return record;
 }
 function canUseMediaRendererForSmartGroup(node){
-    const enabled = new URLSearchParams(window.location.search).get('media_renderer') === '1';
+    const enabled = new URLSearchParams(window.location.search).get('media_renderer') !== '0';
     return Boolean(enabled && window.WorkbenchNodeClient?.isLoopback?.() && window.WorkbenchNodeShell && window.WorkbenchMediaRenderer && isSmartGroupNode(node) && smartGroupMediaRecord(node).output_refs.length);
 }
 function selectSmartNodeFromShell(nodeId, modifiers={}){
@@ -2762,15 +2753,15 @@ function applyViewport(){
 }
 function nodeShellSemanticZoomEnabled(){
     const params = new URLSearchParams(window.location.search);
-    return params.get('semantic_zoom') === '1'
-        && params.get('node_shell') === '1'
+    return params.get('semantic_zoom') !== '0'
+        && params.get('node_shell') !== '0'
         && window.WorkbenchNodeClient?.isLoopback?.()
         && window.WorkbenchSemanticZoom;
 }
 function nodeShellScreenSpaceControlsEnabled(){
     const params = new URLSearchParams(window.location.search);
-    return params.get('screen_space_controls') === '1'
-        && params.get('node_shell') === '1'
+    return params.get('screen_space_controls') !== '0'
+        && params.get('node_shell') !== '0'
         && window.WorkbenchNodeClient?.isLoopback?.()
         && window.WorkbenchScreenSpaceControls;
 }
@@ -6073,7 +6064,7 @@ function handleAssetLibraryUpdatedMessage(data={}){
 const smartClientId = `canvas_smart_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
 let canvasSyncInFlight = false;
 let canvasSyncTimer = null;
-let canvasMetaPollTimer = null;
+let smartRemoteSync = null;
 let connectionLayerRaf = 0;
 function mergeSmartImageLists(localImgs, remoteImgs){
     const out = [];
@@ -6313,9 +6304,8 @@ async function mergeReloadCanvasNow(){
         return;
     }
     try {
-        const res = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}`);
-        if(!res.ok) return;
-        const data = await res.json();
+        const data = await window.WorkbenchCanvasPersistence.load(canvasId);
+        if(!data.ok) return;
         if(data && data.canvas) applyMergedServerCanvas(data.canvas);
     } catch(e) {}
 }
@@ -6324,27 +6314,25 @@ function scheduleCanvasMergeReload(delay=200){
     canvasSyncTimer = setTimeout(() => { mergeReloadCanvasNow(); }, delay);
 }
 function handleCanvasUpdatedMessage(data={}){
-    if(!data || data.type !== 'canvas_updated') return;
-    if(!canvasId || data.canvas_id !== canvasId) return;
-    if(data.client_id && data.client_id === smartClientId) return; // 自己发的，忽略
+    const update = window.WorkbenchCanvasUpdateMessage.newerForCanvas(data, {
+        canvasId, clientId:smartClientId, currentUpdatedAt:canvas?.updated_at,
+    });
+    if(!update) return;
     if(canvasSyncInFlight) return; // 我正在保存，保存完成/409 合并会处理
-    const remoteUpdatedAt = Number(data.updated_at || 0);
-    if(remoteUpdatedAt && remoteUpdatedAt <= Number(canvas?.updated_at || 0)) return;
     scheduleCanvasMergeReload(200);
 }
 function startCanvasMetaPoll(){
     // WS / iframe 转发不可靠时的兜底：定期看服务器 updated_at 是否变新，变新就合并拉取
-    if(canvasMetaPollTimer) return;
-    canvasMetaPollTimer = setInterval(async () => {
-        if(!canvasId || !canvas) return;
-        if(canvasSyncInFlight || dragState || selectionState) return;
-        try {
-            const res = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}/meta`);
-            if(!res.ok) return;
-            const meta = await res.json();
-            if(Number(meta.updated_at || 0) > Number(canvas.updated_at || 0)) mergeReloadCanvasNow();
-        } catch(e) {}
-    }, 8000);
+    if(!smartRemoteSync){
+        smartRemoteSync = window.WorkbenchCanvasRemoteSync.create({
+            canvasId:() => canvasId,
+            currentUpdatedAt:() => canvas?.updated_at,
+            isEligible:() => Boolean(canvas && !canvasSyncInFlight && !dragState && !selectionState),
+            onNewer:() => mergeReloadCanvasNow(),
+            intervalMs:8000,
+        });
+    }
+    smartRemoteSync.start();
 }
 function connectAssetLibrarySyncSocket(){
     if(window.parent && window.parent !== window) return;
@@ -6874,9 +6862,8 @@ function migrateSmartGroupImageMembers(){
 async function loadCanvas(){
     if(!canvasId) return;
     try {
-        const res = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}`);
-        if(!res.ok) return;
-        const data = await res.json();
+        const data = await window.WorkbenchCanvasPersistence.load(canvasId);
+        if(!data.ok) return;
         canvas = data.canvas;
         rememberCanvasListProject(canvas.project || 'default');
         canvasUsesConnections = Object.prototype.hasOwnProperty.call(canvas || {}, 'connections');
@@ -6940,29 +6927,25 @@ async function saveCanvas(){
     const storageCanvas = canvasForStorage();
     canvasSyncInFlight = true;
     try {
-        const res = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}`, {
-            method:'PUT',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                title:storageCanvas.title || tr('smart.title'),
-                icon:storageCanvas.icon || 'sparkles',
-                nodes:storageCanvas.nodes || [],
-                connections:storageCanvas.connections || [],
-                viewport:storageCanvas.viewport || {x:0,y:0,scale:1},
-                logs:storageCanvas.logs || [],
-                settings:storageCanvas.settings,
-                base_updated_at:storageCanvas.updated_at || canvas.updated_at || 0,
-                client_id:smartClientId
-            })
+        const result = await window.WorkbenchCanvasPersistence.save(canvasId, {
+            title:storageCanvas.title || tr('smart.title'),
+            icon:storageCanvas.icon || 'sparkles',
+            nodes:storageCanvas.nodes || [],
+            connections:storageCanvas.connections || [],
+            viewport:storageCanvas.viewport || {x:0,y:0,scale:1},
+            logs:storageCanvas.logs || [],
+            settings:storageCanvas.settings,
+            base_updated_at:storageCanvas.updated_at || canvas.updated_at || 0,
+            client_id:smartClientId
         });
-        if(res.ok){
-            const data = await res.json();
+        if(result.ok){
+            const data = result.payload;
             if(data.canvas && data.canvas.updated_at) canvas.updated_at = data.canvas.updated_at;
-        } else if(res.status === 409) {
+        } else if(result.status === 409) {
             // 冲突：别人先保存了。合并对方的状态（节点 id 合并、图片取并集，谁都不丢），
             // 然后用对方最新的 updated_at 作为基底重存，把合并结果落盘——而不是直接覆盖对方。
-            const data = await res.json().catch(() => ({}));
-            const serverCanvas = data.detail?.canvas;
+            const data = result.payload;
+            const serverCanvas = result.canvas;
             if(serverCanvas){
                 applyMergedServerCanvas(serverCanvas);
                 nodes.forEach(node => {
@@ -6970,8 +6953,8 @@ async function saveCanvas(){
                     if(node.runSettings) node.runSettings = settingsForStorage(node.runSettings);
                 });
                 canvas.nodes = nodes;
-            } else if(data.detail?.updated_at) {
-                canvas.updated_at = data.detail.updated_at;
+            } else if(result.updatedAt) {
+                canvas.updated_at = result.updatedAt;
             }
             clearTimeout(saveTimer);
             saveTimer = setTimeout(saveCanvas, 300);

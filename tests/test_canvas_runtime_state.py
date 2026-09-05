@@ -135,7 +135,7 @@ console.log(JSON.stringify({{left:G.portAnchor(r,'left'),right:G.portAnchor(r,'r
             (classic, "canvasUnifiedRuntimeEnabled", "applyCanvasRuntimeViewport", "applyCanvasRuntimeSelection"),
             (smart, "smartUnifiedRuntimeEnabled", "applySmartRuntimeViewport", "applySmartRuntimeSelection"),
         ):
-            self.assertIn("unified_canvas') === '1'", source)
+            self.assertIn("unified_canvas') !== '0'", source)
             self.assertIn(enabled, source)
             self.assertIn(zoom, source)
             self.assertIn(selection, source)

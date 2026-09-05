@@ -16,10 +16,13 @@ class CanvasNodesRuntimeTests(unittest.TestCase):
         self.audit_path = Path(self.temp.name) / "audit" / "events.jsonl"
         self.canvas_patch = patch.object(main, "CANVAS_DIR", str(self.canvas_dir))
         self.audit_patch = patch.object(main, "CANVAS_NODE_AUDIT_PATH", str(self.audit_path))
+        self.routing_patch = patch.object(main, "WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED", False)
         self.canvas_patch.start()
         self.audit_patch.start()
+        self.routing_patch.start()
 
     def tearDown(self):
+        self.routing_patch.stop()
         self.audit_patch.stop()
         self.canvas_patch.stop()
         self.temp.cleanup()

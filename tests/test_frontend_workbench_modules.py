@@ -8,6 +8,196 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FrontendWorkbenchModulesTests(unittest.TestCase):
+    def test_editor_adapters_share_the_workflow_transfer_transport_boundary(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "workflow-transfer-client.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const requests = [];
+const sandbox = {{
+  window: {{}}, Blob, FormData,
+  fetch: async (path, options={{}}) => {{
+    requests.push({{path, options}});
+    return path.endsWith('/export')
+      ? {{ok:true, json: async () => ({{}}), blob: async () => new Blob(['archive'])}}
+      : {{ok:true, json: async () => ({{workflow:{{nodes:[{{id:'n1'}}], connections:[]}}}})}};
+  }},
+}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+(async () => {{
+  const archive = await sandbox.window.WorkbenchCanvasWorkflowTransfer.exportArchive({{nodes:[{{id:'n1'}}]}}, 'flow.zip');
+  const imported = await sandbox.window.WorkbenchCanvasWorkflowTransfer.importArchive(new Blob(['flow']));
+  console.log(JSON.stringify({{archiveSize:archive.size, imported, requests:requests.map(item => ({{path:item.path, method:item.options.method, body:item.options.body}}))}}));
+}})();
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["archiveSize"], 7)
+        self.assertEqual(payload["imported"]["workflow"]["nodes"], [{"id": "n1"}])
+        self.assertEqual(payload["requests"][0]["path"], "/api/canvas-workflows/export")
+        self.assertEqual(payload["requests"][0]["method"], "POST")
+        self.assertEqual(json.loads(payload["requests"][0]["body"]), {
+            "nodes": [{"id": "n1"}], "include_resources": True, "filename": "flow.zip",
+        })
+        self.assertEqual(payload["requests"][1]["path"], "/api/canvas-workflows/import")
+        self.assertEqual(payload["requests"][1]["method"], "POST")
+
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            page_source = (ROOT / "static" / page).read_text(encoding="utf-8")
+            editor_source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertLess(page_source.index("workbench/canvas/workflow-transfer-client.js"), page_source.index(editor))
+            self.assertIn("WorkbenchCanvasWorkflowTransfer.exportArchive", editor_source)
+            self.assertIn("WorkbenchCanvasWorkflowTransfer.importArchive", editor_source)
+        classic_export = editor_source = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        classic_export = classic_export[classic_export.index("async function exportSelectedWorkflow(") : classic_export.index("function defaultWorkflowAssetTarget(")]
+        classic_import = editor_source[editor_source.index("async function importWorkflowFile(") : editor_source.index("function startNodeDrag(")]
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        smart_export = smart[smart.index("async function exportSelectedSmartWorkflow(") : smart.index("function insertSmartWorkflowIntoCanvas(")]
+        smart_import = smart[smart.index("async function importSmartWorkflowFile(") : smart.index("const RECENT_SMART_SETTINGS_KEY")]
+        for adapter in (classic_export, classic_import, smart_export, smart_import):
+            self.assertNotIn("/api/canvas-workflows/export", adapter)
+            self.assertNotIn("/api/canvas-workflows/import", adapter)
+
+    def test_editor_adapters_share_the_canvas_record_persistence_boundary(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-persistence-client.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const requests = [];
+const responses = [
+  {{ok:true, status:200, json: async () => ({{canvas:{{id:'canvas/1', updated_at:7}}}})}},
+  {{ok:false, status:409, json: async () => ({{detail:{{canvas:{{id:'canvas/1', updated_at:8}}, updated_at:8}}}})}},
+  {{ok:true, status:200, json: async () => ({{updated_at:9}})}},
+];
+const sandbox = {{window: {{}}, fetch: async (path, options={{}}) => {{
+  requests.push({{path, options}});
+  return responses.shift();
+}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+(async () => {{
+  const loaded = await sandbox.window.WorkbenchCanvasPersistence.load('canvas/1');
+  const stale = await sandbox.window.WorkbenchCanvasPersistence.save('canvas/1', {{title:'Shared'}});
+  const metadata = await sandbox.window.WorkbenchCanvasPersistence.metadata('canvas/1');
+  console.log(JSON.stringify({{loaded, stale, metadata, requests}}));
+}})();
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["loaded"]["canvas"]["id"], "canvas/1")
+        self.assertEqual(payload["stale"]["status"], 409)
+        self.assertEqual(payload["stale"]["canvas"]["updated_at"], 8)
+        self.assertEqual(payload["stale"]["updatedAt"], 8)
+        self.assertEqual(payload["metadata"]["updatedAt"], 9)
+        self.assertEqual(payload["requests"][0]["path"], "/api/canvases/canvas%2F1")
+        self.assertEqual(payload["requests"][0]["options"]["method"], "GET")
+        self.assertEqual(payload["requests"][1]["options"]["method"], "PUT")
+        self.assertEqual(json.loads(payload["requests"][1]["options"]["body"]), {"title": "Shared"})
+        self.assertEqual(payload["requests"][2]["path"], "/api/canvases/canvas%2F1/meta")
+
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            text = (ROOT / "static" / page).read_text(encoding="utf-8")
+            self.assertLess(text.index("workbench/canvas/canvas-persistence-client.js"), text.index(editor))
+            self.assertLess(text.index("workbench/canvas/canvas-remote-sync.js"), text.index(editor))
+            self.assertLess(text.index("workbench/canvas/canvas-update-message.js"), text.index(editor))
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        classic_save = classic[classic.index("async function saveCanvas(){") : classic.index("async function loadConfig(){")]
+        classic_open = classic[classic.index("async function openCanvas(id){") : classic.index("function applyRemoteCanvasData(remote){")]
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        smart_load = smart[smart.index("async function loadCanvas(){") : smart.index("function scheduleSave(){")]
+        smart_save = smart[smart.index("async function saveCanvas(){") : smart.index("function imageMetaFromNode")]
+        classic_remote_sync = classic[classic.index("async function syncRemoteCanvasNow(){") : classic.index("function startCanvasRemotePolling(){")]
+        smart_remote_sync = smart[smart.index("async function mergeReloadCanvasNow(){") : smart.index("function connectAssetLibrarySyncSocket(){")]
+        for adapter in (classic_save, classic_open, smart_load, smart_save, classic_remote_sync, smart_remote_sync):
+            self.assertIn("WorkbenchCanvasPersistence", adapter)
+            self.assertNotIn("fetch(`/api/canvases/", adapter)
+
+    def test_remote_sync_polls_canvas_metadata_through_adapter_callbacks(self):
+        remote_sync = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-remote-sync.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const timers = [];
+let metadataCalls = 0;
+const sandbox = {{
+  window: {{WorkbenchCanvasPersistence: {{metadata: async canvasId => {{
+    metadataCalls += 1;
+    return {{ok:true, updatedAt: metadataCalls === 1 ? 8 : 9, canvasId}};
+  }}}}}},
+  setInterval: (callback, intervalMs) => {{ timers.push({{callback, intervalMs}}); return timers.length; }},
+  clearInterval: handle => {{ timers[handle - 1].cleared = true; }},
+}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(remote_sync))}, 'utf8'), sandbox);
+(async () => {{
+  let current = 7;
+  const newer = [];
+  const sync = sandbox.window.WorkbenchCanvasRemoteSync.create({{
+    canvasId: () => 'canvas-1', currentUpdatedAt: () => current,
+    isEligible: () => true, onNewer: result => newer.push(result.updatedAt), intervalMs: 2500,
+  }});
+  const first = await sync.check();
+  current = 9;
+  const second = await sync.check();
+  sync.start(); sync.start(); sync.stop();
+  console.log(JSON.stringify({{first, second, newer, metadataCalls, interval:timers[0].intervalMs, timerCount:timers.length, cleared:timers[0].cleared, running:sync.isRunning()}}));
+}})();
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["first"])
+        self.assertFalse(payload["second"])
+        self.assertEqual(payload["newer"], [8])
+        self.assertEqual(payload["metadataCalls"], 2)
+        self.assertEqual(payload["interval"], 2500)
+        self.assertEqual(payload["timerCount"], 1)
+        self.assertTrue(payload["cleared"])
+        self.assertFalse(payload["running"])
+
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        self.assertIn("function ensureCanvasRemoteSync(){", classic)
+        self.assertIn("intervalMs:2500", classic)
+        self.assertIn("window.WorkbenchCanvasRemoteSync.create", classic)
+        self.assertIn("intervalMs:8000", smart)
+        self.assertIn("window.WorkbenchCanvasRemoteSync.create", smart)
+
+    def test_canvas_update_messages_are_filtered_before_adapter_sync_policy(self):
+        update_message = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-update-message.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(update_message))}, 'utf8'), sandbox);
+const match = sandbox.window.WorkbenchCanvasUpdateMessage.newerForCanvas(
+  {{type:'canvas_updated', canvas_id:'canvas-1', client_id:'other', updated_at:8}},
+  {{canvasId:'canvas-1', clientId:'local', currentUpdatedAt:7}},
+);
+const own = sandbox.window.WorkbenchCanvasUpdateMessage.newerForCanvas(
+  {{type:'canvas_updated', canvas_id:'canvas-1', client_id:'local', updated_at:8}},
+  {{canvasId:'canvas-1', clientId:'local', currentUpdatedAt:7}},
+);
+const stale = sandbox.window.WorkbenchCanvasUpdateMessage.newerForCanvas(
+  {{type:'canvas_updated', canvas_id:'canvas-1', client_id:'other', updated_at:7}},
+  {{canvasId:'canvas-1', clientId:'local', currentUpdatedAt:7}},
+);
+const wrongCanvas = sandbox.window.WorkbenchCanvasUpdateMessage.newerForCanvas(
+  {{type:'canvas_updated', canvas_id:'canvas-2', client_id:'other', updated_at:8}},
+  {{canvasId:'canvas-1', clientId:'local', currentUpdatedAt:7}},
+);
+console.log(JSON.stringify({{match, own, stale, wrongCanvas}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["match"], {"canvasId": "canvas-1", "clientId": "other", "updatedAt": 8})
+        self.assertIsNone(payload["own"])
+        self.assertIsNone(payload["stale"])
+        self.assertIsNone(payload["wrongCanvas"])
+
+        for source in (ROOT / "static" / "js" / "canvas.js", ROOT / "static" / "js" / "smart-canvas.js"):
+            text = source.read_text(encoding="utf-8")
+            start = text.index("function handleCanvasUpdatedMessage")
+            handler = text[start : start + 700]
+            self.assertIn("WorkbenchCanvasUpdateMessage.newerForCanvas", handler)
+
     def test_opening_a_classic_canvas_does_not_issue_a_touch_write(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
         opening = classic[classic.index("async function openCanvas(id){") : classic.index("function applyRemoteCanvasData(remote){")]
@@ -782,8 +972,8 @@ console.log(JSON.stringify({{
         styles = (ROOT / "static" / "css" / "smart-canvas.css").read_text(encoding="utf-8")
         policy = (ROOT / "static" / "js" / "workbench" / "canvas" / "semantic-zoom.js").read_text(encoding="utf-8")
         self.assertIn("function nodeShellSemanticZoomEnabled()", smart)
-        self.assertIn("params.get('semantic_zoom') === '1'", smart)
-        self.assertIn("params.get('node_shell') === '1'", smart)
+        self.assertIn("params.get('semantic_zoom') !== '0'", smart)
+        self.assertIn("params.get('node_shell') !== '0'", smart)
         self.assertIn("WorkbenchSemanticZoom.viewModel(node, viewport.scale)", smart)
         self.assertIn("setAttribute('data-semantic-presentation', model.presentation)", smart)
         self.assertIn("applyNodeShellSemanticZoom();", smart)
@@ -804,7 +994,7 @@ console.log(JSON.stringify({{
         self.assertIn(".semantic-zoom-indicator", styles)
         self.assertNotIn("data-semantic-presentation=\"icon\"", styles)
         self.assertIn("function nodeShellScreenSpaceControlsEnabled()", smart)
-        self.assertIn("params.get('screen_space_controls') === '1'", smart)
+        self.assertIn("params.get('screen_space_controls') !== '0'", smart)
         self.assertIn("WorkbenchScreenSpaceControls.controlViewModel", smart)
         self.assertIn("--screen-space-port-size", styles)
         self.assertIn("--screen-space-toolbar-scale", styles)
@@ -822,7 +1012,7 @@ console.log(JSON.stringify({{
         styles = (ROOT / "static" / "css" / "smart-canvas.css").read_text(encoding="utf-8")
         page = (ROOT / "static" / "smart-canvas.html").read_text(encoding="utf-8")
         self.assertIn("function canUseNodeShellForSmartLegacy(node)", smart)
-        self.assertIn("params.get('legacy_renderer') === '1'", smart)
+        self.assertIn("params.get('legacy_renderer') !== '0'", smart)
         self.assertIn("function mountNodeShellForSmartLegacyNodes()", smart)
         self.assertIn("mountNodeShellForSmartLegacyNodes();", smart)
         self.assertIn("preserveLegacyContent:true", smart)
@@ -845,8 +1035,8 @@ console.log(JSON.stringify({{
             "prompt", "loop", "output", "llm", "generator", "midjourney",
             "msgen", "video", "comfy", "rh", "ltxDirector", "minimax", "promptGroup",
         ]
-        self.assertIn("params.get('node_shell') === '1'", classic)
-        self.assertIn("params.get('legacy_renderer') === '1'", classic)
+        self.assertIn("params.get('node_shell') !== '0'", classic)
+        self.assertIn("params.get('legacy_renderer') !== '0'", classic)
         self.assertIn("window.WorkbenchNodeClient?.isLoopback?.()", classic)
         self.assertIn(
             "['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', "
@@ -1067,7 +1257,7 @@ console.log(JSON.stringify({{
         styles = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
         page = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
         self.assertIn("function canvasNodeShellEnabled()", classic)
-        self.assertIn("params.get('node_shell') === '1'", classic)
+        self.assertIn("params.get('node_shell') !== '0'", classic)
         self.assertIn("function mountCanvasNodeShellForMedia", classic)
         self.assertIn("onclick=\"menuAdd('group')\"", page)
         self.assertIn("function addVersionedBlankGroupNode", classic)
@@ -1081,7 +1271,7 @@ console.log(JSON.stringify({{
         self.assertIn("controlSettings:CANVAS_NODE_SHELL_LEGACY_CONTROLS", classic)
         self.assertIn("cardClasses:['node-shell-mounted'", classic)
         self.assertIn("function canvasLegacyRendererEnabled()", classic)
-        self.assertIn("params.get('legacy_renderer') === '1'", classic)
+        self.assertIn("params.get('legacy_renderer') !== '0'", classic)
         self.assertIn("function mountCanvasNodeShellForLegacy", classic)
         self.assertIn("['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type)", classic)
         self.assertIn("function canvasLegacyNodeShellPorts(node)", classic)
@@ -1103,7 +1293,7 @@ console.log(JSON.stringify({{
         self.assertIn("if(to.type === 'group') return ['image','prompt'].includes(from.type)", classic)
         self.assertIn("group.items.push(fromId)", classic)
         self.assertIn("function canvasNodeShellSemanticZoomEnabled()", classic)
-        self.assertIn("params.get('semantic_zoom') === '1'", classic)
+        self.assertIn("params.get('semantic_zoom') !== '0'", classic)
         self.assertIn("WorkbenchSemanticZoom.viewModel(node, viewport.scale)", classic)
         self.assertIn("nodeEl.dataset.semanticPresentation = model.presentation", classic)
         self.assertIn(".node:not(.node-shell-mounted)", classic)
@@ -1129,7 +1319,7 @@ console.log(JSON.stringify({{
         self.assertIn("command-registry.js?v=2026.09.04.5", page)
         self.assertIn("creation-catalog.js?v=2026.09.04.1", page)
         self.assertIn("generation-intent.js?v=2026.09.04.1", page)
-        self.assertIn("canvas.js?v=2026.09.04.16", page)
+        self.assertIn("canvas.js?v=2026.09.05.2", page)
         self.assertIn("WorkbenchUnifiedRenderHost.cardShellView({selected:selected.has(node.id), onIntent:handleCanvasNodeShellIntent})", classic)
         self.assertIn("const canvasNodeShellIntentAdapter = window.WorkbenchUnifiedRenderHost.createIntentAdapter({", classic)
         self.assertIn("delete:intent => deleteNodeFromButton(intent.nodeId)", classic)

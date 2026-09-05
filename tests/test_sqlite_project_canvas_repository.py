@@ -87,6 +87,33 @@ class SqliteProjectCanvasRepositoryTests(unittest.TestCase):
         with self.assertRaises(AuthorizationError):
             self.repository.mutate_canvas(actor_id="viewer", canvas_id="canvas-1", expected_revision=2, mutation=lambda _: None)
 
+    def test_mutation_rejects_a_write_that_loses_the_sqlite_compare_and_swap(self):
+        self.repository.import_legacy_canvases([self.legacy_canvas()], self.mapper())
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                """CREATE TRIGGER force_canvas_cas_conflict BEFORE UPDATE ON canvases
+                   WHEN OLD.id = 'canvas-1' AND OLD.revision = 1
+                   BEGIN
+                     UPDATE canvases SET revision = 2 WHERE id = OLD.id;
+                     SELECT RAISE(IGNORE);
+                   END"""
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        with self.assertRaises(CanonicalStaleRevisionError) as stale:
+            self.repository.mutate_canvas(
+                actor_id=LOCAL_WORKSPACE_ACTOR_ID,
+                canvas_id="canvas-1",
+                expected_revision=1,
+                mutation=lambda value: value.update({"title": "must not overwrite"}),
+            )
+
+        self.assertEqual(stale.exception.current_revision, 2)
+        self.assertEqual(self.repository.load_canvas_payload("canvas-1")["title"], "Legacy")
+
     def test_audit_failure_rolls_back_the_canonical_mutation(self):
         self.repository.import_legacy_canvases([self.legacy_canvas()], self.mapper())
         connection = sqlite3.connect(self.path)

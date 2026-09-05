@@ -1,28 +1,50 @@
-# AI Workbench — Development Execution Plan V2.1
+# AI Workbench — Development Execution Plan V2.2.1
 
 Status: active Gate program  
-Repository: `GUOXIAOLUO/xinhuabu`  
 Method: incremental / strangler / evidence-based Gates  
-V1: Web UI  
-Primary orchestration target: Codex Harness / App Server  
-First Industry Package: WholeHouse
+V1 client: Web UI  
+V1 product platform: macOS, Apple Silicon / arm64 first  
+Primary Agent runtime: Codex Harness / App Server  
+First Industry Package: WholeHouse  
+
+This plan evolves V2.1 without restarting completed work. R0-R3 remain historical/completed evidence. The active Round remains whatever `docs/status/CURRENT_EXECUTION_STATUS.md` authorizes; planning changes do not authorize later implementation.
 
 ---
 
 ## Execution rules
 
-For every Codex task:
+For every architecture/behavior task:
 
-1. read `AGENTS.md`
-2. read `docs/status/CURRENT_EXECUTION_STATUS.md`
-3. read `CURRENT_ARCHITECTURE.md`
-4. read `TARGET_ARCHITECTURE.md`
-5. read `MIGRATION_PLAN.md`
-6. read this file
-7. inspect affected source/tests
-8. execute exactly one authorized Round
+1. read `AGENTS.md`;
+2. read `docs/status/CURRENT_EXECUTION_STATUS.md`;
+3. read `CURRENT_ARCHITECTURE.md`;
+4. read `TARGET_ARCHITECTURE.md`;
+5. read `MIGRATION_PLAN.md`;
+6. read this file;
+7. inspect affected source/tests;
+8. execute exactly the currently authorized Round.
 
-A Gate passes only when its acceptance criteria are verified.
+A Gate passes only after evidence.
+
+Never rewrite current-state/status documents as though future V2.2.1 work already exists.
+
+---
+
+## Cross-round hard rules
+
+1. One Unified Canvas.
+2. SQLite is the V1 structured authority after controlled cutover.
+3. `main.py`, `canvas.js`, `smart-canvas.js` may lose responsibility but not gain new Workbench business responsibility.
+4. Workbench Runtime does not depend on a Git repository URL.
+5. V1 product support is macOS-first; Core remains portable.
+6. Codex is the primary Agent runtime, but Workbench does not depend on one exact Codex version.
+7. Stable Codex App Server APIs are preferred; experimental APIs cannot be the only required V1 path.
+8. Codex-discovered models must be normal ModelAvailability choices.
+9. Codex Thread/Project state is not Workbench business authority.
+10. WholeHouse remains an Industry Package.
+11. No silent ModelAvailability/Executor fallback.
+12. Agent mutation is typed/proposal-first.
+13. Platform Engineering requirements apply across all Rounds.
 
 ---
 
@@ -31,188 +53,112 @@ A Gate passes only when its acceptance criteria are verified.
 | Round | Name | Primary result |
 |---|---|---|
 | R0 | Repository Truth + Architecture Refresh | live facts + repaired current-state docs |
-| R1 | Codex Harness Foundation | CodexBridge transport/runtime + launch policy |
-| R2 | Unified Canvas Convergence A | U2-U6 with compatibility adapters |
-| R3 | Project Identity + Canonical Canvas Persistence | ProjectRecord/CanvasRecord/SQLite/auth/audit |
-| R4 | Unified Canvas Cutover | U7 + canonical cutover + duplicate runtime removal |
+| R1 | Codex App Server Client Foundation | safe CodexBridge transport/runtime foundation |
+| R2 | Unified Canvas Convergence A | U2-U6 compatibility convergence |
+| R3 | Project Identity + Canonical Canvas Persistence | Project/Canvas/SQLite/auth/audit foundation |
+| R4 | Unified Canvas Cutover | U7 + SQLite cutover + duplicate runtime removal |
 | R5 | Generic Node UX + Mutation | NodeShell V2 + Inspector + mutation contract |
-| R6 | Port/Data Contracts + SkillRegistry | typed bindings + discovery/create/render Gate |
-| R7 | Provider + Model Registry | ProviderConnection + ModelAvailability selection Gate |
-| R8 | Execution Runtime | cross-model + cross-executor execution Gate |
-| R9 | Asset + Artifact + Version | durable versioned inputs/results/provenance |
-| R10 | Entity + Knowledge Runtime | structured project facts + reproducible context |
-| R11 | Workflow + Approval + Handoff Core | formal workflow/governance/export |
-| R12 | Package Runtime + WorkspaceProfile | package lifecycle + historical definitions |
-| R13 | Common Capability Package | useful general Workbench without WholeHouse |
-| R14 | Codex Workbench Orchestration | scoped tools + GraphProposal + Agent Panel |
-| R15 | WholeHouse Vertical Slice | one real room/space end-to-end |
+| R6 | Port/Data + Definition + Prompt + Skill | typed data + dynamic resources |
+| R7 | Provider + Model + Codex Projection | ModelAvailability + Codex/direct discovery |
+| R8 | Execution Runtime + Integration Contracts | multi-route typed execution |
+| R9 | Asset + Artifact + Asset Library + Catalog | durable resources + product/catalog foundation |
+| R10 | Entity + Knowledge Runtime | structured facts + reproducible context |
+| R11 | Workflow + Approval + Handoff | durable business process/governance |
+| R12 | Package + Workspace + Integration Runtime | package lifecycle + shared resources + integrations |
+| R13 | Common Capability Package | useful general Workbench |
+| R14 | Codex Workbench Agent Integration | scoped tools + GraphProposal + Agent Panel |
+| R15 | WholeHouse Vertical Slice | one real design path end-to-end |
 | R16 | WholeHouse Expansion | approved V1 capability catalog |
-| R17 | CAD Handoff + Real Project Validation | production-like design-work validation |
+| R17 | CAD/File Handoff + Real Project Validation | production-like design workflow validation |
 
 ---
 
 # R0 — Repository Truth + Architecture Refresh
 
-## Goal
+Historical purpose remains unchanged.
 
-Make current-state documentation trustworthy before feature work.
+Verify current source/test truth, architecture/status accuracy, feature flags, authorities, Legacy monolith responsibility and security boundaries.
 
-Verify:
-
-- live HEAD/worktree
-- test/static baseline
-- U0-U7 actual state
-- feature flags
-- Legacy read/write authority
-- NodeRecord/EdgeRecord
-- NodeCreation/NodeMutation/GraphMutation
-- RendererRegistry/NodeShell
-- provider/model settings
-- Codex Exec/App Server status
-- security boundary
-- benchmark/performance follow-up
-- Legacy monolith responsibility baseline for main.py / canvas.js / smart-canvas.js
-
-### CURRENT_ARCHITECTURE requirement
-
-If source/tests disprove a current-state statement, update `CURRENT_ARCHITECTURE.md`.
-
-Do not inject target-state design.
-
-### Known issue to verify
-
-Verify whether optional `NodeCreateCommand.expected_revision` can be normalized to `0` in create-node-and-edge flow and then rejected by graph mutation validation.
-
-Allowed changes: current/status docs plus narrowly necessary test-harness repair only.
-
-Forbidden: product behavior, App Server code, Canvas redesign, schema change, persistence switch, Skill/Model/Execution implementation, WholeHouse.
+R0 does not implement target features.
 
 Gate: current truth is explicit and exactly one next Round is authorized.
 
 ---
 
-# R1 — Codex Harness Foundation
+# R1 — Codex App Server Client Foundation
+
+R1 historical foundation remains valid, but the target interpretation is clarified.
 
 ## Goal
 
-Establish App Server behind `CodexBridge` without Workbench mutation authority.
+Establish a safe App Server client boundary without Workbench mutation authority.
 
-Pre-work:
+## Required design
 
-- inspect installed/target Codex version
-- inspect official schema/protocol for that version
-- create/update proposal
-- inspect codex-exec compatibility
-- define HarnessLaunchPolicy
+```text
+Workbench
+-> CodexBridge / CodexRuntime boundary
+-> official Codex App Server
+```
 
-HarnessLaunchPolicy covers:
+R1 does not implement another Harness.
 
+## Foundation concerns
+
+- local executable resolution
 - bounded cwd/workspace
 - environment/secret filtering
-- filesystem/shell policy
-- destructive approval
-- timeout/cancel
-- child-process lifecycle
+- stdio JSONL transport
+- initialize/initialized handshake
+- Thread/Turn basics
+- model/config discovery
+- normalized events
+- cancel/shutdown/recovery
+- Codex Exec compatibility
+- restrictive runtime policy
 - no Workbench mutation tools
 
-Deliver:
+## Long-term compatibility rule
 
-- start/initialize
-- health/version
-- Thread/Turn basics
-- normalized events
-- approval round trip
-- model/config discovery
-- cancel/shutdown/recovery
-- codex-exec compatibility
+Recorded/tested Codex versions are diagnostics/evidence, not hard runtime equality requirements.
 
-Gate: transport/runtime + launch policy verified; no project mutation tools.
+Stable App Server APIs are the default baseline.
+
+Gate: transport/runtime foundation verified; no Workbench project mutation tools.
 
 ---
 
 # R2 — Unified Canvas Convergence A
 
-## Goal
+Historical purpose remains unchanged.
 
-Complete U2-U6 without prematurely implementing R3 canonical persistence or R8 target ExecutionRuntime.
+Complete shared graph/port/group interaction, unified rendering/NodeShell, unified creation catalog/application-service paths, compatibility execution adapters and one normal Canvas entry.
 
-### U2
-shared graph/port/group interaction.
+Do not implement final ExecutionRuntime or SQLite authority switch here.
 
-### U3
-unified render host + NodeShell + RendererRegistry.
-
-### U4
-unified creation catalog + application-service paths.
-
-### U5
-**compatibility execution adapters only** around current Classic/Smart/provider execution.
-
-U5 does not prove final ExecutorRegistry.
-
-### U6
-one normal product Canvas entry; old deep links remain during migration.
-
-### Explicitly not R2
-
-- U7 is not executed in R2.
-- no SQLite authority switch.
-- no final ExecutorRegistry/ExecutionProfile runtime.
-- no new Workbench business responsibility added to canvas.js or smart-canvas.js.
-
-Gate:
-
-- one normal product Canvas entry
-- shared interaction/render/creation
-- representative Legacy execution through compatibility adapter
-- U7 remains pending
-- status authorizes R3
+Gate: U2-U6 proven; U7 remains R4.
 
 ---
 
 # R3 — Project Identity + Canonical Canvas Persistence
 
-## Goal
-
-Create canonical Project/Canvas authority before U7.
+Historical purpose remains unchanged.
 
 Deliver:
 
-- ProjectRecord
-- ProjectMember/local actor mapping
-- CanvasRecord
-- logical Canvas revision
-- action/resource AuthorizationService
-- SQLite migrations/repositories
-- Legacy import/backfill/compare
-- explicit authority state
-- transactional mutation + durable audit/outbox
-- migration/rollback report
+- ProjectRecord / ProjectMember;
+- CanvasRecord;
+- logical revision;
+- authorization;
+- SQLite migrations/repositories;
+- Legacy import/backfill/compare;
+- authority state;
+- transactional mutation + durable audit/outbox;
+- rollback/reporting.
 
-Test Legacy identity cases:
+Canonical concurrency must converge on true logical revision semantics.
 
-- project="default"
-- owner=""
-- non-empty owner
-- project mismatch
-- rollback
-
-Rules:
-
-- no silent owner invention
-- revision != updated_at
-- NodeRecord v1 remains compatible
-- source Canvas runtimes/pages remain until R4
-
-Gate:
-
-- Project/Canvas survive restart
-- revision concurrency works
-- Legacy fixtures compare
-- identity mapping report works
-- canonical mutation + audit atomic
-- authorization enforced
-- rollback exists
+Gate: durable Project/Canvas foundation and migration evidence.
 
 ---
 
@@ -220,281 +166,476 @@ Gate:
 
 ## Goal
 
-Complete **U7** against R3 canonical authority.
+Complete U7 against R3 canonical authority.
 
-Deliver:
+This remains the only active implementation priority until its Gate passes.
 
-- source-record backup/validation
-- canonical cutover
-- workflow import/export verification
-- expected-revision conflict verification
-- Legacy function verification through adapters
-- 100/300-node performance verification
-- duplicate Classic/Smart runtime/page/CSS removal only after acceptance
+## Deliver
 
-Important:
+- source-record backup and checksum validation;
+- true expected-revision conflict handling;
+- fix any compatibility lost-update path before cutover;
+- SQLite canonical Canvas authority enabled as normal runtime;
+- workflow import/export parity;
+- Unified Canvas default entry/runtime/catalog;
+- old records import/read;
+- remove product-visible Classic/Smart source distinction;
+- remove duplicate Classic/Smart runtime/page/CSS after acceptance;
+- retire migration flags whose purpose ends at R4;
+- 100/300-node verification;
+- restart/read/write/conflict/rollback verification.
 
-U7 canonical persistence means R3 authority.
-Do not invent a second canonical JSON authority.
+## Repository independence cleanup allowed in R4
+
+Remove/disable Legacy product self-update responsibility that depends on a Git repository URL.
+
+Do not merely replace an old repository URL with a new one.
+
+## Forbidden
+
+- PromptRegistry implementation;
+- Catalog/Product implementation;
+- R7 Model Registry;
+- R8 ExecutionRuntime;
+- WholeHouse business features.
 
 Gate:
 
-- one Canvas page/runtime/catalog
-- canonical persistence active
-- old records import/read
-- no product source-mode distinction
-- duplicate runtime removed after acceptance
-- benchmark budget passes
-- rollback backup tested
+```text
+one Canvas runtime
++ canonical persistence active
++ no duplicate product runtime
++ verified conflict semantics
++ rollback evidence
+```
 
 ---
 
 # R5 — Generic Node UX + Mutation
 
-Goal: generic task-oriented Node UX.
+## Goal
 
-Deliver:
+Make the Unified Canvas a generic task-oriented Workbench surface.
 
-- NodeShell V2 five regions
-- Inspector
-- NodeMutationService expansion
-- model-availability extension editing
-- execution extension editing
-- next-step/materialization/branch intent seams
+## Deliver
+
+- NodeShell V2;
+- Inspector;
+- NodeMutationService expansion;
+- typed editing seam for InputBindings;
+- ModelAvailability selection editing;
+- execution-profile/route editing;
+- branch/materialization/next-step intent seams.
+
+## UX target
+
+NodeShell five regions:
+
+1. task/status;
+2. inputs;
+3. main content/result;
+4. Skill/Prompt/Model/Execution;
+5. actions/output.
+
+Advanced implementation details remain in Inspector.
 
 Gate:
 
-- Inspector uses application service
-- no raw new mutation path
-- generic renderers share NodeShell
-- no WholeHouse branches
+- no new raw mutation path;
+- no provider/WholeHouse/Codex protocol branches in Canvas;
+- all generic renderers share NodeShell.
 
 ---
 
-# R6 — Port/Data Contracts + SkillRegistry
+# R6 — Port/Data + Definition + Prompt + Skill
 
 ## Goal
 
-Prove dynamic definition discovery/create/render without borrowing the future ExecutionRuntime.
+Prove dynamic resources independent from fixed Canvas code.
 
-Deliver:
+## Deliver
 
-- PortTypeRegistry
-- typed InputBinding
-- Collection
-- CompatibilityResolver foundation
-- DefinitionResolver
-- Skill manifest V2
-- Workbench Skill vs Codex Skill separation
-- SkillRegistry
-- Skill Library
-- `common.image-analysis`
+- PortTypeRegistry;
+- typed InputBinding;
+- Collection;
+- CompatibilityResolver foundation;
+- DefinitionResolver;
+- PromptDefinition;
+- PromptVersion;
+- PromptRegistry;
+- PromptService;
+- Workbench Skill manifest;
+- SkillRegistry;
+- Skill Library;
+- Workbench Skill vs Codex Skill separation;
+- one `common.image-analysis` proof.
 
-### Gate A — Dynamic definition
+## Prompt proof
+
+A Prompt can be discovered, versioned, referenced by a Skill/Workflow and represented on Canvas without provider-specific Canvas code.
+
+## Skill proof
 
 A conforming Skill:
 
-- no Canvas source edit
-- discovered/listed
-- resolves through DefinitionResolver
-- creates through NodeCreationService
-- renders through RendererRegistry/NodeShell
-- validates typed bindings
-- survives restart
+- is discovered/listed;
+- resolves through DefinitionResolver;
+- creates through NodeCreationService;
+- renders through RendererRegistry/NodeShell;
+- validates typed bindings;
+- survives restart.
 
-Actual target execution is not part of R6.
+Actual target execution remains R8.
 
 ---
 
-# R7 — Provider + Model Registry
+# R7 — Provider + Model + Codex Projection
 
 ## Goal
 
-Prove Provider/Connection/Model/Availability semantics before target execution.
+Make ModelAvailability the canonical user-facing model-route selection layer.
 
-Deliver:
+## Deliver — provider/model
 
-- ProviderDefinition
-- ProviderConnection
-- CredentialRef
-- ProviderRegistry
-- ModelDefinition
-- capability vocabulary
-- ModelRegistry
-- ModelAvailability
-- ModelCompatibilityService
-- Codex discovery source
-- direct-provider discovery
-- API Center backend endpoints
-- Model Picker
-- NodeRecord v1 availability-extension migration
+- ProviderDefinition;
+- ProviderConnection;
+- CredentialRef;
+- ProviderRegistry;
+- ModelDefinition;
+- normalized capability vocabulary;
+- ModelRegistry;
+- ModelAvailability;
+- ModelCompatibilityService;
+- direct-provider discovery;
+- API Center backend;
+- Model Picker;
+- NodeRecord v1 availability-extension migration.
 
-No silent Model/Connection/Availability fallback.
+## ModelAvailability v2 direction
 
-### Gate B — Model selection
+Support neutral route identity:
+
+```text
+route_type = provider | runtime
+route_ref
+executor_type
+```
+
+This allows:
+
+```text
+GPT-X · OpenAI API
+GPT-X · Codex Harness
+```
+
+to coexist without pretending Codex is a ProviderConnection.
+
+## Deliver — Codex compatibility/projection
+
+Introduce/strengthen:
+
+```text
+CodexExecutableResolver
+AppServerProcess
+CodexProtocolClient
+CodexProtocolCompatibility
+CodexProjectionService
+CodexEventNormalizer
+```
+
+R7 compatibility work must:
+
+- inspect installed Codex version;
+- verify current official stable App Server schema;
+- regenerate/compare protocol schema where used;
+- verify initialize/initialized;
+- verify Thread/Turn basics;
+- verify `model/list`;
+- verify config/account/skills discovery used by this Round;
+- keep stdio as V1 transport;
+- treat experimental API as optional;
+- update the recorded tested version without requiring exact equality.
+
+## CodexBridge hardening
+
+Before R7 Gate:
+
+- drain stderr;
+- fail pending requests on unexpected EOF;
+- bound event queues;
+- handle overload `-32001` with bounded retry/backoff where appropriate;
+- replace generic server-request decline with typed dispatch;
+- normalize Thread/Turn/Item/server-request events;
+- use generated/validated DTOs where practical;
+- identify the client as Xinhuabu Workbench.
+
+## Codex projection
+
+Examples:
+
+```text
+model/list -> ModelDefinition / ModelAvailability
+skills/list -> CodexSkillAvailability
+provider/runtime capability data -> normalized capability projection
+account/config -> runtime diagnostics
+```
+
+No Codex Project/Thread record becomes Workbench business authority.
+
+## Gate B
 
 For one Skill:
 
-- two compatible ModelAvailabilities can be discovered/filtered
-- either can be selected
-- selection persists/reloads
-- incompatibility reason is explainable
-- v1 ModelBinding remains compatible
-- provenance-ready requested selection is representable
+- at least two compatible ModelAvailabilities can be discovered/filtered where environment permits;
+- a Codex-discovered availability can appear in the same Model Picker as direct-provider availability;
+- selection persists/reloads;
+- incompatibility reason is explainable;
+- no silent route fallback;
+- NodeRecord v1 remains readable.
 
-Actual execution is deferred to R8.
+Execution is R8.
 
 ---
 
-# R8 — Execution Runtime
+# R8 — Execution Runtime + Integration Contracts
 
 ## Goal
 
-Prove `Skill + ModelAvailability + ExecutionProfile + Executor`.
+Prove:
 
-Deliver:
+```text
+Skill
++ Prompt
++ ModelAvailability
++ ExecutionProfile
++ Executor
+```
 
-- ExecutionProfile
-- RuntimeConnection / ExecutorEndpoint
-- ExecutorRegistry
-- CodexHarnessExecutor
-- ModelApiExecutor
-- ComfyUIExecutor
-- RunningHubExecutor
-- ScriptExecutor
-- MCPExecutor seam
-- MCP tool-vs-executor separation
-- ExecutionPolicy
-- ExecutionRun/Attempt/State/Event
-- timeout/cancel/partial-result/usage
-- explicit executor capabilities
-- requirement merge rules
+## Deliver
 
-No silent executor fallback.
+- ExecutionProfile;
+- RuntimeConnection / ExecutorEndpoint;
+- ExecutorRegistry;
+- CodexHarnessExecutor;
+- ModelApiExecutor;
+- ComfyUIExecutor;
+- RunningHubExecutor;
+- ScriptExecutor;
+- MCPExecutor;
+- ExecutionPolicy;
+- ExecutionRun / ExecutionAttempt / ExecutionEvent;
+- timeout/cancel/partial-result/usage;
+- explicit executor capabilities;
+- requirement merge rules;
+- IntegrationDefinition;
+- IntegrationConnection;
+- IntegrationRegistry foundation.
 
-### Gate C — Actual execution
+## CodexHarnessExecutor rule
 
-Same Skill:
+Keep it thin. It may:
 
-- runs with two compatible ModelAvailabilities where available
-- runs through at least two compatible execution routes
-- produces same typed output contract
-- records actual model/provider/runtime/executor/profile
-- demonstrates cancel or explicit unsupported-cancel
-- durable execution state behaves as designed
+- resolve Skill/Prompt/ModelAvailability;
+- attach Codex Skill/context;
+- start/resume Thread;
+- start Turn;
+- normalize output;
+- materialize ArtifactVersion.
+
+It must not reimplement:
+
+- Agent loop;
+- Codex tool loop;
+- Codex MCP runtime;
+- subagent framework;
+- Codex authentication.
+
+## Gate C
+
+Same Workbench Skill:
+
+- executes through a Codex Harness ModelAvailability where available;
+- executes through at least one compatible non-Codex route where available;
+- produces the same typed output contract;
+- records requested/actual model, route, runtime, executor and profile;
+- proves cancel or explicit unsupported-cancel;
+- durable run state survives the designed restart/disconnect scenario.
 
 ---
 
-# R9 — Asset + Artifact + Version
+# R9 — Asset + Artifact + Asset Library + Catalog
 
-Deliver:
+## Deliver
 
-- BlobRef
-- Asset/AssetVersion
-- Artifact/ArtifactVersion
-- Collection persistence
-- Artifact materialization
-- parent/branch/new-version
-- provenance core
-- dependency/freshness
-- authorized delivery URLs
+- BlobRef;
+- Asset / AssetVersion;
+- Artifact / ArtifactVersion;
+- Collection persistence;
+- provenance/dependency/freshness;
+- Asset Library UX/API;
+- Catalog;
+- CatalogCategory;
+- CatalogEntry;
+- CatalogService;
+- authorized delivery URLs.
 
-Gate: old versions preserved, outdated deterministic, rerun creates version, intermediate Artifact may remain non-materialized.
+## Asset Library
+
+Support workspace/project Assets, search, tags, collections/favorites as product UX evolves.
+
+## Catalog
+
+Catalog is generic.
+
+WholeHouse products are not Core ProductRecord special cases.
+
+Gate:
+
+- old versions preserved;
+- rerun produces versioned result;
+- Catalog survives restart;
+- Workspace/Project scope is representable.
 
 ---
 
 # R10 — Entity + Knowledge Runtime
 
+## Deliver
+
 Entity:
 
-- definitions/properties/relations
-- EntityRecord
-- immutable EntityVersion
-- authorization/audit
+- Entity definitions/properties/relations;
+- EntityRecord;
+- immutable EntityVersion;
+- authorization/audit.
 
 Knowledge:
 
-- sources/scopes
-- retrieval contract
-- KnowledgeSnapshot/evidence
-
-Gate: formal execution captures KnowledgeSnapshot; formal Entity mutation creates EntityVersion.
-
----
-
-# R11 — Workflow + Approval + Handoff Core
-
-Deliver:
-
-- WorkflowDefinition/Version/Run
-- NodeRun
-- retry/cancel/pause semantics
-- import/export/compare
-- ApprovalRequest/Decision
-- reviewer policy
-- Frozen formal version
-- generic Handoff manifest/checksums
-
-Gate: restartable workflow, authorized human freeze, frozen formal version immutable, generic handoff validates.
-
----
-
-# R12 — Package Runtime + WorkspaceProfile
-
-Deliver:
-
-- PackageRegistry
-- package manifest/lifecycle
-- dependency checks
-- ProjectPackageLock
-- DefinitionSnapshot
-- package migrations
-- WorkspaceProfile
+- sources/scopes;
+- retrieval contract;
+- KnowledgeSnapshot/evidence.
 
 Gate:
 
-- package lock/version persists
-- disable blocks new usage as intended
-- historical DefinitionRefs remain resolvable
-- profile changes defaults/ranking only
+- formal Entity mutation creates EntityVersion;
+- formal execution captures KnowledgeSnapshot where applicable.
+
+---
+
+# R11 — Workflow + Approval + Handoff
+
+## Deliver
+
+- WorkflowDefinition / WorkflowVersion / WorkflowRun;
+- NodeRun;
+- retry/cancel/pause;
+- import/export/compare;
+- Workflow-as-Node/composite representation;
+- ApprovalRequest / ApprovalDecision;
+- Frozen formal version;
+- generic Handoff manifest/checksums.
+
+Keep Codex runtime approval separate from Workbench business approval.
+
+Gate:
+
+- restartable workflow;
+- authorized human freeze;
+- frozen version immutable;
+- generic handoff validates.
+
+---
+
+# R12 — Package + Workspace + Integration Runtime
+
+## Deliver
+
+- PackageRegistry;
+- package manifest/lifecycle;
+- dependency checks;
+- ProjectPackageLock;
+- DefinitionSnapshot;
+- package migrations;
+- Workspace resource scope;
+- WorkspaceProfile;
+- Integration Runtime;
+- Native API / MCP / Local Bridge / File Handoff / Human Handoff seams.
+
+Codex Apps/MCP are projected where useful rather than reimplemented.
+
+Gate:
+
+- package lock/version persists;
+- historical DefinitionRefs remain resolvable;
+- shared workspace resources work across projects;
+- one non-model Integration can be represented through the generic contract.
 
 ---
 
 # R13 — Common Capability Package
 
-Goal: prove general Workbench without WholeHouse.
+## Goal
+
+Prove useful general Workbench without WholeHouse.
 
 Candidates:
 
-- image/document analysis
-- structured extraction
-- text generation
-- image generation/edit
-- video generation
-- comparison
-- code/repository analysis
-- research when ready
+- image/document analysis;
+- structured extraction;
+- text generation;
+- image generation/edit;
+- video generation;
+- comparison;
+- code/repository analysis;
+- research.
 
-Gate: WholeHouse absent and general Canvas/Skill/Model/Codex/API/ComfyUI/Artifact/Entity/Knowledge/Workflow remain useful.
+Gate: WholeHouse can be absent while Canvas/Prompt/Skill/Model/Codex/API/Asset/Artifact/Entity/Knowledge/Workflow remain useful.
 
 ---
 
-# R14 — Codex Workbench Orchestration
+# R14 — Codex Workbench Agent Integration
 
-Deliver:
+## Goal
 
-- scoped Workbench tools
-- GraphProposal
-- stale/rebase policy
-- Agent Panel
+Expose Workbench domain capabilities safely to Codex Harness.
 
-Gate D:
+This Round does not build another Agent Harness.
+
+## Deliver
+
+- WorkbenchToolContract;
+- CodexWorkbenchToolBridge;
+- stable MCP adapter or another approved stable bridge;
+- optional DynamicTool adapter only when treated as experimental;
+- Agent Panel;
+- GraphProposal;
+- stale/rebase policy;
+- CodexSessionLink where useful.
+
+## Tool examples
+
+- project.read;
+- canvas.get_context;
+- asset.search/read;
+- catalog.search/read;
+- prompt.read;
+- skill.search/resolve;
+- compatibility.resolve;
+- workflow.read;
+- execution.get;
+- artifact.read;
+- graph.propose;
+- approval.request.
+
+Every tool routes through Application Services.
+
+## Gate D
 
 ```text
 select Asset
--> Agent reads scoped context
+-> Codex reads scoped Workbench context
 -> CompatibilityResolver
--> Skill/model/executor choice
+-> Skill/model/executor proposal
 -> GraphProposal
 -> user confirmation
 -> revision check
@@ -504,135 +645,175 @@ select Asset
 -> Canvas result
 ```
 
-No DOM/raw DB/project JSON mutation.
+No raw DOM/DB/project JSON mutation.
 
 ---
 
 # R15 — WholeHouse Vertical Slice
 
+## End-to-end slice
+
 ```text
 Project Intake
--> Requirement/Floorplan Analysis
+-> Requirement Analysis
+-> Floorplan Analysis
 -> Space Entity
 -> Space Concept
+-> Product / Material Selection
 -> Render
 -> Design Review
--> Approval/Frozen
--> CAD Handoff preparation
+-> Approval / Frozen
+-> CAD/File Handoff
 ```
 
-Gate: no WholeHouse Core branches; versioned data, KnowledgeSnapshot, model/availability/execution choice, approval/freeze/handoff.
+WholeHouse uses generic:
+
+- Prompt;
+- Skill;
+- Asset;
+- Catalog;
+- Entity;
+- Workflow;
+- Approval;
+- Handoff;
+- ModelAvailability;
+- ExecutionRuntime.
+
+No WholeHouse branch is added to Canvas/Model/Executor Core.
 
 ---
 
 # R16 — WholeHouse Expansion
 
-Target approximately 12-15 high-quality capabilities:
+Candidates:
 
-- Project Intake
-- Requirement Analysis
-- Floorplan Analysis
-- Site Photo Analysis
-- Reference Analysis
-- Style Direction
-- Space Concept
-- Cabinet Concept
-- Material Proposal
-- Render
-- Image Edit
-- Version Compare
-- Design Review
-- Pending Issues
-- CAD Handoff
+- site photo analysis;
+- reference analysis;
+- style direction;
+- cabinet concept;
+- material proposal;
+- product selection;
+- render;
+- image edit;
+- version compare;
+- pending-issues review;
+- CAD review.
 
-Production/installation/after-sales remain outside V1.
+V1 still excludes:
+
+- production/CNC;
+- installation;
+- after-sales.
 
 ---
 
-# R17 — CAD Handoff + Real Project Validation
+# R17 — CAD/File Handoff + Real Project Validation
+
+Use real studio work:
+
+- real customer;
+- real floorplan;
+- real product/material/hardware catalog;
+- real images/renders;
+- real CAD;
+- real Kujiale/GuiGui file handoff.
 
 Validate:
 
-- small/medium/complex projects
-- restart/recovery
-- retry/cancel
-- version/outdated
-- 100-300 Node Canvas
-- authorization/security
-- proposal stale handling
-- model/provider/executor correctness
-- package history
-- designer/CAD reviewer acceptance
-- handoff checksums/completeness
+- restart/recovery;
+- backup/restore;
+- Codex compatibility after supported local update;
+- Codex/direct API node routes;
+- ModelAvailability persistence;
+- provenance/version/outdated;
+- Workflow;
+- Approval/Frozen;
+- Package history;
+- Handoff checksum/readiness;
+- 100/300-node Canvas behavior.
 
-Exit:
-
-1. WholeHouse completes approved/frozen design + handoff.
-2. WholeHouse disabled still leaves a useful generic AI Workbench.
+Direct Agent control of Kujiale/GuiGui is not required for V1 acceptance.
 
 ---
 
-## Cross-Round Legacy Monolith Rule
+# WholeHouse parallel validation track
 
-For every implementation Round:
+Use WholeHouse as an acceptance scenario throughout without moving business logic into Core.
 
-> `main.py`, `static/js/canvas.js`, and `static/js/smart-canvas.js` may lose responsibility but must not gain new Workbench business responsibility.
+| Round | WholeHouse validation |
+|---|---|
+| R4 | real project Canvas migration/open/save |
+| R5 | space/task Node UX |
+| R6 | Prompt/Skill/Data contracts |
+| R7 | Codex/direct API Model Picker |
+| R8 | same Skill through multiple routes |
+| R9 | CAD/photo/render/product resources |
+| R10 | Customer/Room/Space/Product facts |
+| R11 | design Workflow/Approval/Handoff |
+| R12 | WholeHouse Package + shared resources |
+| R14 | Agent GraphProposal |
+| R15 | full vertical slice |
 
-New Workbench capability implementation goes directly to:
+---
 
-- `workbench/api/`
-- `workbench/application/`
-- `workbench/domain/`
-- `workbench/repositories/`
-- `workbench/runtimes/`
-- `packages/...`
-- shared modular frontend boundaries such as `static/js/workbench/...`
+# Platform Engineering track
 
-Changes to Legacy monoliths should be limited to:
+Applies to every Round.
 
-- composition/wiring;
-- compatibility adapters;
-- delegation into new modules;
-- removal/extraction of old responsibility;
-- narrowly scoped fixes to existing Legacy behavior.
+## Settings
 
-Each Round must state:
+Move new configuration behind typed settings groups.
+
+## Migration
+
+Use versioned MigrationRunner rather than indefinite ad-hoc startup repairs.
+
+## Storage
+
+Domain uses BlobRef; V1 LocalBlobStore, future NAS/object adapters.
+
+## Durable events
+
+Long-running execution/workflow state must not live only in browser memory/WebSocket connection objects.
+
+## Backup
+
+Provide backup/verify/restore/dry-run restore for formal Workbench data.
+
+## Feature flags
+
+Every migration flag declares its removal Gate.
+
+## Schema/API
+
+Prefer Pydantic -> JSON Schema -> OpenAPI -> frontend types.
+
+## Quality gates
+
+Add CI, lint/type/coverage/dependency checks and architecture guards incrementally.
+
+## Architecture guards
+
+Eventually reject:
+
+- new Workbench business systems in Legacy monoliths;
+- provider/Codex/WholeHouse branching in Canvas;
+- Codex protocol DTOs in Core;
+- Agent raw DB/DOM/JSON mutation;
+- runtime dependency on Git repository URL;
+- required V1 feature depending only on experimental Codex API.
+
+---
+
+# Mac-first product rule
+
+V1 official product/runtime target:
 
 ```text
-Legacy responsibility delta
-
-main.py:
-  added Workbench responsibility: yes/no
-  responsibilities removed/delegated: ...
-
-static/js/canvas.js:
-  added Workbench responsibility: yes/no
-  responsibilities removed/delegated: ...
-
-static/js/smart-canvas.js:
-  added Workbench responsibility: yes/no
-  responsibilities removed/delegated: ...
+macOS
+Apple Silicon / arm64 first
 ```
 
-Any `yes` requires an approved compatibility exception with an explicit removal Gate; otherwise the Round fails architecture review.
+Core remains portable.
 
-## Cross-Round report format
-
-Every Round reports:
-
-1. Completed work
-2. Modified files
-3. Added files
-4. Deleted files
-5. Architecture changes
-6. Persistence changes
-7. API changes
-8. UI changes
-9. Compatibility
-10. Security impact
-11. Automated tests
-12. Browser/manual tests
-13. Known issues
-14. Exact next authorized Round
-15. Forbidden next actions
-16. Legacy responsibility delta
+Windows support is future work through infrastructure/release adapters, not a current Gate.

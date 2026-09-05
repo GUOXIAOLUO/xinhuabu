@@ -1,16 +1,49 @@
-# Development Baseline
+# Development Baseline — V2.2.1
 
-## Supported environment
+## Product/development platform
 
-- Python 3.10 or later on macOS, Windows, or Linux.
-- Node.js 20 or later for JavaScript syntax checks.
-- Optional local integrations: `ffmpeg`, Codex CLI, Gemini CLI, Jimeng CLI, and ComfyUI. The required Python environment includes `websockets` so the Canvas live-update endpoint can accept WebSocket upgrades.
+V1 official product and primary development target:
 
-The optional integrations are not required to run unit tests. Their availability is checked by the application when their corresponding features are used.
+- macOS
+- Apple Silicon / arm64 first
+
+Core architecture remains platform-neutral so Windows support can be added later through infrastructure/release adapters.
+
+Windows and Linux are not V1 product-support targets.
+
+---
+
+## Supported local development environment
+
+Recommended:
+
+- current supported macOS on Apple Silicon;
+- Python 3.10 or later;
+- Node.js 20 or later for JavaScript checks;
+- optional local integrations as needed: `ffmpeg`, Codex CLI, Gemini CLI, Jimeng CLI, ComfyUI.
+
+The optional integrations are not required for the base unit test suite unless a focused integration test explicitly needs them.
+
+---
+
+## Repository-independent runtime rule
+
+Normal Workbench startup/runtime must not require the source Git repository or a Git hosting service.
+
+Do not add runtime GitHub/GitLab repository URLs for:
+
+- self-update;
+- version discovery;
+- source tree download;
+- normal product startup.
+
+Git remains an external developer/version-control tool.
+
+---
 
 ## First-time setup
 
-From the repository root, create an isolated environment and install the project requirements:
+From the repository root, create an isolated Python environment and install project requirements.
 
 ```bash
 python3 -m venv .venv
@@ -18,20 +51,21 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 ```
 
-On Windows, replace `.venv/bin/python` with `.venv\\Scripts\\python.exe`.
+If direct PyPI access has a TLS handshake problem on macOS, a project-approved mirror/fallback may be used only inside the virtual environment.
 
-If direct PyPI access has a TLS handshake failure, use the verified macOS fallback below. It installs only into `.venv` and does not alter the system Python:
+Provider credentials belong in backend-only secret configuration such as `API/.env` until the target CredentialRef/connection systems replace the Legacy path.
 
-```bash
-UV_NO_PROGRESS=1 uv --system-certs pip install \
-  --python .venv/bin/python \
-  --default-index https://mirrors.aliyun.com/pypi/simple/ \
-  -r requirements-dev.txt
-```
+Never put raw credentials in:
 
-Provider credentials belong in `API/.env`. Do not put credentials in browser storage, source files, fixtures, or committed configuration.
+- browser storage;
+- Canvas/Node data;
+- source files;
+- fixtures;
+- committed configuration.
 
-## Verification
+---
+
+## Base verification
 
 Run the Python test suite:
 
@@ -39,7 +73,7 @@ Run the Python test suite:
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Run the entry-point syntax checks:
+Run syntax/static checks applicable to the current Round:
 
 ```bash
 .venv/bin/python -c "import ast,pathlib; ast.parse(pathlib.Path('main.py').read_text(encoding='utf-8')); print('main.py AST OK')"
@@ -47,39 +81,193 @@ node --check static/js/canvas.js
 node --check static/js/smart-canvas.js
 ```
 
+As the repository evolves, CI should add Ruff/type/coverage/dependency/schema/architecture checks without changing the Round/Gate discipline.
+
+---
+
 ## Runtime files
 
-Generated Canvas/project/conversation data, provider configuration, previews, uploaded media, outputs, test caches, and the virtual environment are intentionally ignored by Git. `data/asset_library.json` remains tracked as the current seed/template data file.
+Generated project/Canvas/runtime data, provider configuration, uploaded media, previews, outputs, caches and virtual environments remain runtime data rather than source.
 
-## Local and LAN mode
+Formal target authorities move progressively to:
 
-The default server binds only to `127.0.0.1:3000`. Launch normally with `python3 main.py` or the supplied launcher and open `http://127.0.0.1:3000/`.
+- SQLite for structured records;
+- BlobStore-backed files;
+- versioned Asset/Artifact records.
 
-LAN mode is deliberately opt-in because this compatibility server does not yet authenticate users. On a trusted network only, set the host before launching:
+---
+
+## Local server mode
+
+Default product-development mode remains loopback-only.
+
+Typical development launch remains:
 
 ```bash
-WORKBENCH_HOST=0.0.0.0 python3 main.py
+python3 main.py
 ```
 
-`WORKBENCH_PORT` changes the port. `WORKBENCH_ALLOWED_ORIGINS` accepts a comma-separated explicit CORS allowlist; wildcard origins are rejected. LAN access uses same-origin requests and does not require adding every LAN address to this list.
+and the Web UI uses the configured local host/port.
 
-## Canvas performance harness
+LAN compatibility is not authenticated multi-user support.
 
-For disposable benchmark Canvas records only, load `/static/canvas-performance-harness.html?id=<canvas-id>&expected=<node-count>`. The harness measures iframe load and the time until the existing Classic Canvas renders the expected number of node elements. Add `&interactions=1` to measure synthetic wheel zoom, board pan, and minimap-jump visual settlement from inside the same-origin iframe. The harness itself does not create, save, or delete graph records; the loaded Legacy Canvas can still issue its normal touch request, so create and purge benchmark records through a controlled test procedure.
+Do not treat wildcard bind as safe remote deployment.
 
-## Manual Canvas smoke checklist
+---
 
-On 2026-09-02, the local server at `127.0.0.1:3300` was checked in the Codex in-app browser with disposable records only:
+## Codex development baseline
 
-- Classic Canvas: created a Canvas through the workspace UI, expanded the quick toolbar, added a Legacy Image node, confirmed the auto-save API record contained one node, and reloaded the editor with that node preserved.
-- Smart Canvas: loaded the empty composer, verified the provider selector and disabled Run control were visible without a provider call, and entered a prompt successfully. Run was intentionally not executed because no provider/model configuration was supplied.
+Codex App Server is the preferred rich integration boundary.
 
-The disposable Classic Canvas was purged after the check. Provider execution, uploads, and destructive user-data paths remain out of this smoke scope.
+V1 client transport:
 
-## Transitional Canvas-node API
+```text
+stdio JSONL
+```
 
-When the server binds to a loopback host only (`127.0.0.1`, `::1`, or `localhost`), the first versioned node endpoints are available at `/api/v1/canvases/{canvas_id}/nodes` and `/api/v1/canvases/{canvas_id}/nodes/{node_id}`. They require a non-empty `X-User-ID`, a matching project identifier, and an expected Canvas revision for every write. The only currently registered definition is `legacy:image@0`; `POST` creates an empty Legacy Image node idempotently, `GET` reads it, `PUT` updates its title and/or position, and `DELETE` removes it plus any Legacy connections that reference it. Every effective write records a secret-free local audit event under ignored runtime data. The endpoints are not registered for LAN or other non-loopback bindings.
+Do not make experimental WebSocket App Server transport a V1 dependency.
 
-## P1.7 browser verification
+### Compatibility policy
 
-To verify the opt-in frontend slice, first create or open a local Canvas through the Canvas list so its owner matches the local browser user, then append `versioned_nodes=1` to its URL. Confirm that top-level Image, Prompt, and Loop creation works; then drag from an existing node port and choose Group. For each created item, first use the editor undo command immediately and confirm the local graph returns to its prior state; create it again, wait for the saved state, reload the page, and confirm the node (and, for Group, its connection) remains present. Undo history is intentionally in-memory and is cleared by reload. In Smart Canvas, open the blank-canvas creation menu and create an empty Group; confirm its empty state and selection, undo it immediately, then create it again and confirm save/reload. Adding members to that Group and nested Group creation remain Legacy paths. Repeat without `versioned_nodes=1` and confirm the Legacy creation behavior remains available.
+Workbench does not require one exact Codex version string.
+
+For Codex integration work:
+
+1. record installed Codex version;
+2. inspect the official App Server stable protocol for that version;
+3. generate/compare official schema where used;
+4. run the repository's Codex compatibility tests;
+5. update the recorded tested version as evidence;
+6. do not branch business behavior on exact version equality.
+
+Official generation commands include:
+
+```bash
+codex app-server generate-json-schema --out <dir>
+codex app-server generate-ts --out <dir>
+```
+
+Generated Codex protocol artifacts belong inside the Codex integration boundary and must not become Core domain contracts.
+
+### Codex process reliability
+
+App Server client code must eventually cover:
+
+- stdout and stderr draining;
+- unexpected EOF/process exit;
+- pending request failure;
+- bounded event queues;
+- overload/backoff;
+- typed server request dispatch;
+- shutdown/recovery.
+
+---
+
+## Codex Skills
+
+Workbench Skill and Codex Skill are different concepts.
+
+When Workbench packages provide Codex `SKILL.md` implementations, prefer session/runtime-supported skill discovery/extra roots rather than treating the user's global Codex home as Workbench authority.
+
+---
+
+## Model Picker development rule
+
+A Codex-discovered model route should be represented through Workbench ModelAvailability just like a direct provider route.
+
+Example UI choices:
+
+```text
+GPT-X · Codex Harness
+GPT-X · OpenAI API
+```
+
+Do not encode Codex as a ModelDefinition.
+
+---
+
+## Canvas performance
+
+R4 and later Canvas Gates must keep reproducible 100/300-node measurements.
+
+Performance harnesses are evidence tools, not business data sources.
+
+A later release budget may add larger/percentile measurements.
+
+---
+
+## Transitional versioned node API
+
+During migration, versioned node routes remain compatibility surfaces until Unified Canvas/canonical mutation owns normal product behavior.
+
+Every write must use expected revision and application services.
+
+Do not add new business systems directly to Legacy page routes.
+
+---
+
+## macOS-specific infrastructure
+
+V1 may use macOS-specific infrastructure adapters for:
+
+- Keychain;
+- file/folder pickers;
+- Finder;
+- local application launching;
+- local software bridges;
+- filesystem permission workflows.
+
+Keep these adapters out of Core domain models so future Windows support can be added without redesigning business records.
+
+---
+
+## Repository hygiene direction
+
+Do not perform broad directory cleanup during an unrelated active Gate.
+
+After R4, plan a bounded hygiene task for historical vendored runtimes/wheels.
+
+Target:
+
+```text
+packages/
+├── common/
+├── wholehouse/
+└── media/
+
+vendor/
+├── wheels/
+└── optional-runtimes/
+```
+
+Windows runtime artifacts are not part of the Mac-first V1 product target.
+
+---
+
+## Manual smoke principle
+
+Manual browser smoke tests use disposable or backed-up records.
+
+For destructive paths:
+
+- create backup first;
+- use known test records;
+- verify restart/reload;
+- remove disposable data afterward.
+
+Do not use unbacked-up real customer data for migration experimentation.
+
+---
+
+## Planning/status discipline
+
+These files have different meanings:
+
+- `CURRENT_ARCHITECTURE.md` = verified current facts;
+- `docs/status/CURRENT_EXECUTION_STATUS.md` = active Round/current evidence;
+- `TARGET_ARCHITECTURE.md` = future architecture;
+- `IMPLEMENTATION_PLAN.md` = Round/Gate plan;
+- `MIGRATION_PLAN.md` = compatibility/authority-switch strategy;
+- `AGENTS.md` = hard repository constraints.
+
+Do not copy future V2.2.1 claims into current-state files until source/tests prove them.

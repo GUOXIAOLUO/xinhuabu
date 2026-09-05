@@ -250,7 +250,6 @@ MODELSCOPE_TREE_URL = "https://www.modelscope.ai/api/v1/studio/daniel8152/Infini
 async def startup_event():
     global GLOBAL_LOOP
     GLOBAL_LOOP = asyncio.get_running_loop()
-    sync_static_html_versions()
     # 启动时整理资产库：给所有图片分组（含默认角色/场景）建好文件夹，并把根目录里的旧素材归整进去。
     try:
         await asyncio.to_thread(migrate_asset_library_into_dirs)
@@ -302,7 +301,10 @@ HISTORY_FILE = os.path.join(BASE_DIR, "history.json")
 API_ENV_FILE = os.path.join(BASE_DIR, "API", ".env")
 DATA_DIR = os.path.join(BASE_DIR, "data")
 WORKBENCH_DATABASE_PATH = os.environ.get("WORKBENCH_DATABASE_PATH", os.path.join(DATA_DIR, "workbench.sqlite3"))
-WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED = (os.getenv("WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED") or "").strip().lower() in {"1", "true", "yes"}
+# R4 makes canonical Canvas routing the normal runtime after a validated migration.
+# An explicit false value remains a bounded rollback control while U7 acceptance is
+# still in progress; unactivated databases continue on the Legacy adapter below.
+WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED = (os.getenv("WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED") or "true").strip().lower() in {"1", "true", "yes"}
 CONVERSATION_DIR = os.path.join(DATA_DIR, "conversations")
 CANVAS_DIR = os.path.join(DATA_DIR, "canvases")
 MEDIA_PREVIEW_DIR = os.path.join(DATA_DIR, "media_previews")
@@ -1803,35 +1805,6 @@ def versioned_static_html(html: str) -> str:
         return f"{match.group('prefix')}{url}?v={cache_version}"
     return pattern.sub(replace, html)
 
-def sync_static_html_versions():
-    version = current_app_version()
-    if not version:
-        return
-    safe_version = urllib.parse.quote(version, safe="._-")
-    try:
-        for name in os.listdir(STATIC_DIR):
-            # 跳过 macOS 在外置硬盘(ExFAT/NTFS)生成的 ._* Apple Double 元数据文件，
-            # 这些是二进制文件，按 UTF-8 读取会抛 UnicodeDecodeError。
-            if name.startswith("._"):
-                continue
-            if not name.lower().endswith(".html"):
-                continue
-            path = os.path.join(STATIC_DIR, name)
-            if not os.path.isfile(path):
-                continue
-            # 单文件容错：某个文件读写失败不应中断整批同步。
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    old = f.read()
-                new = versioned_static_html(re.sub(r'([?&]v=)[^"\'`\s<>)]*', rf'\g<1>{safe_version}', old))
-                if new != old:
-                    with open(path, "w", encoding="utf-8", newline="") as f:
-                        f.write(new)
-            except Exception as e:
-                print(f"同步静态页面版本号失败({name}): {e}")
-    except Exception as e:
-        print(f"同步静态页面版本号失败: {e}")
-
 def static_html_response(filename: str):
     path = os.path.join(STATIC_DIR, filename)
     with open(path, "r", encoding="utf-8") as f:
@@ -1951,29 +1924,8 @@ def parse_prompt_template_markdown(text: str):
 
 @app.get("/api/app-info")
 def app_info():
-    version = current_app_version()
     return {
-        "version": version,
-        "repo_url": GITHUB_REPO_URL,
-        "version_url": GITHUB_VERSION_URL,
-        "tree_url": GITHUB_TREE_URL,
-        "sources": {
-            "github": {
-                "label": "GitHub",
-                "repo_url": GITHUB_REPO_URL,
-                "version_url": GITHUB_VERSION_URL,
-                "tree_url": GITHUB_TREE_URL,
-                "update_notes_url": GITHUB_UPDATE_NOTES_URL,
-            },
-            "modelscope": {
-                "label": "ModelScope",
-                "repo_url": MODELSCOPE_REPO_URL,
-                "version_url": MODELSCOPE_VERSION_URL,
-                "tree_url": MODELSCOPE_TREE_URL,
-                "update_notes_url": MODELSCOPE_UPDATE_NOTES_URL,
-            },
-        },
-        "update_notes": read_local_update_notes(version),
+        "version": current_app_version(),
         "server": {
             "host": WORKBENCH_HOST,
             "port": WORKBENCH_PORT,
@@ -2026,7 +1978,6 @@ def update_connectivity_targets() -> List[Tuple[str, str, str, bool]]:
         ("Google 连通性", "https://www.google.com/generate_204", "reference", False),
     ]
 
-@app.get("/api/update-connectivity/probe")
 def update_connectivity_probe(name: str):
     """实时检测：只探测单个目标，前端可并发调用并逐条刷新。"""
     for t_name, url, source, required in update_connectivity_targets():
@@ -2037,7 +1988,6 @@ def update_connectivity_probe(name: str):
             return item
     raise HTTPException(status_code=404, detail="未知的连通性检测目标")
 
-@app.get("/api/update-connectivity")
 def update_connectivity():
     targets = update_connectivity_targets()
     results = []
@@ -2100,7 +2050,6 @@ def version_gt(a: str, b: str) -> bool:
     tb += [0] * (n - len(tb))
     return ta > tb
 
-@app.get("/api/check-update")
 def check_update():
     """服务端检测 GitHub 与 ModelScope 两个源的远端版本（走系统代理，避免浏览器跨域/被墙）。"""
     current = current_app_version()
@@ -2561,7 +2510,6 @@ def create_update_backup(
             shutil.rmtree(backup_dir, ignore_errors=True)
         raise
 
-@app.post("/api/update-from-github")
 def update_from_github(req: UpdateRequest = UpdateRequest()):
     if not UPDATE_LOCK.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="正在更新中，请稍后再试")
@@ -2742,7 +2690,6 @@ def list_update_backups() -> List[Dict[str, Any]]:
         })
     return sorted(items, key=lambda item: float(item.get("created_at") or 0), reverse=True)
 
-@app.get("/api/update-backups")
 def get_update_backups():
     return {"backups": list_update_backups()}
 
@@ -2751,7 +2698,6 @@ class RollbackRequest(BaseModel):
     auto_restart: bool = False
     restart_delay: int = 3
 
-@app.post("/api/update-rollback")
 def rollback_update(req: RollbackRequest):
     if not req.name:
         raise HTTPException(status_code=400, detail="缺少备份名称")
@@ -3695,7 +3641,7 @@ def canvas_path(canvas_id):
     return os.path.join(CANVAS_DIR, f"{cleaned}.json")
 
 def canvas_repository():
-    """Select the explicit R4 SQLite compatibility route or retained JSON route."""
+    """Use canonical SQLite after authority activation, otherwise the bounded Legacy adapter."""
     if WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED:
         canonical = canonical_project_canvas_repository()
         if canonical.canvas_authority() == "sqlite":
@@ -3703,7 +3649,7 @@ def canvas_repository():
     return LegacyJsonCanvasRepository(CANVAS_DIR, clock_ms=now_ms, lock=CANVAS_LOCK)
 
 def canonical_project_canvas_repository():
-    """Compose the R3 SQLite authority seam; Legacy routes remain on JSON until switch verification."""
+    """Compose the R3/R4 authority seam without making SQLite an implicit authority switch."""
     repository = SqliteProjectCanvasRepository(WORKBENCH_DATABASE_PATH)
     repository.migrate()
     return repository
