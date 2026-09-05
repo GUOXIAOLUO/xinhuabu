@@ -112,6 +112,10 @@ CanvasRecord
 
 Classic/Smart are migration sources, not permanent modes.
 
+**A single Canvas entry page is not sufficient evidence of Unified Canvas completion. Unified Canvas requires one product runtime.**
+
+During R4, Classic/Smart may survive only as bounded compatibility adapters. Product-relevant Smart Canvas capabilities must be migrated into shared Unified Canvas modules before duplicate runtime removal. After the R4 Gate, Classic/Smart must not remain permanent product modes or independent product runtimes.
+
 Do not add another industry Canvas.
 
 ---

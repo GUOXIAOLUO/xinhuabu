@@ -2,10 +2,14 @@
 (function exposeWorkflowTransferClient(global) {
     'use strict';
 
-    async function responseError(response, fallback) {
-        const payload = await response.json().catch(() => ({}));
-        return payload?.detail || payload?.message || fallback;
+    function httpError() {
+        const formatter = global.WorkbenchCanvasHttpError;
+        if (!formatter) throw new Error('Canvas HTTP error module is unavailable');
+        return formatter;
     }
+
+    function errorMessage(payload, fallback) { return httpError().message(payload, fallback); }
+    function responseError(response, fallback) { return httpError().responseMessage(response, fallback); }
 
     async function exportArchive(payload, filename) {
         const response = await fetch('/api/canvas-workflows/export', {
@@ -25,8 +29,41 @@
         return response.json();
     }
 
+    function normalizeImported(data) {
+        if (Array.isArray(data)) return {nodes: data, connections: []};
+        if (Array.isArray(data?.nodes)) {
+            return {nodes: data.nodes, connections: Array.isArray(data.connections) ? data.connections : []};
+        }
+        if (Array.isArray(data?.workflow?.nodes)) {
+            return {
+                nodes: data.workflow.nodes,
+                connections: Array.isArray(data.workflow.connections) ? data.workflow.connections : [],
+            };
+        }
+        return {nodes: [], connections: []};
+    }
+
+    function jsonExportBlob(payload) {
+        return new Blob([JSON.stringify(payload, null, 2)], {type: 'application/json'});
+    }
+
+    function downloadBlob(blob, filename, options = {}) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename || options.fallbackFilename || '';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), Number(options.revokeAfterMs) || 0);
+    }
+
     global.WorkbenchCanvasWorkflowTransfer = Object.freeze({
         exportArchive,
         importArchive,
+        normalizeImported,
+        jsonExportBlob,
+        downloadBlob,
+        errorMessage,
     });
 }(window));

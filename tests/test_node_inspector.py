@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "static" / "js" / "workbench" / "canvas" / "node-inspector.js"
 MEDIA_MODULE = ROOT / "static" / "js" / "workbench" / "canvas" / "media-renderer.js"
+MEDIA_KIND_MODULE = ROOT / "static" / "js" / "workbench" / "canvas" / "media-kind.js"
 RECORDS_MODULE = ROOT / "static" / "js" / "workbench" / "canvas" / "records.js"
 
 
@@ -79,6 +80,7 @@ const fs = require('fs');
 const vm = require('vm');
 const sandbox = {{window: {{}}}};
 vm.runInNewContext(fs.readFileSync({json.dumps(str(MODULE))}, 'utf8'), sandbox);
+vm.runInNewContext(fs.readFileSync({json.dumps(str(MEDIA_KIND_MODULE))}, 'utf8'), sandbox);
 vm.runInNewContext(fs.readFileSync({json.dumps(str(MEDIA_MODULE))}, 'utf8'), sandbox);
 const model = sandbox.window.WorkbenchNodeInspector.viewModel({{
   renderer: {{id: 'legacy', version: '1'}},

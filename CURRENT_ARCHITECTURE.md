@@ -19,8 +19,9 @@ only. Its claims that NodeRecord, NodeCreationService, RendererRegistry, and
 ## Executive finding
 
 The application remains a local-first AI media studio implemented primarily by a
-19,466-line FastAPI monolith and two large browser Canvas scripts. Legacy JSON and
-filesystem data remain the default page/runtime authority. The repository now also contains versioned
+large FastAPI monolith and two large browser Canvas scripts. SQLite CanvasRecord is
+the default page/runtime authority after explicit activation; Legacy JSON/filesystem
+remain bounded import and rollback compatibility. The repository now also contains versioned
 NodeRecord/EdgeRecord views, lossless Legacy adapters, restricted
 NodeCreationService/NodeMutationService/GraphMutationService boundaries,
 localhost-only `/api/v1` node routes, and opt-in shared Canvas runtime, NodeShell,
@@ -31,9 +32,10 @@ ProjectRecord/ProjectMember/CanvasRecord repository, action-based canonical
 authorization, a lossless Legacy import/compare/rollback service, transactional
 audit/outbox, and an explicit migration-report command. SQLite authority state is
 activated after R3's verified import/compare (22 imported, none skipped or
-different). R4 adds a SQLite compatibility repository and double-gated routing;
-the default page/route runtime remains Legacy JSON, while an isolated flag-enabled
-process passed API and read-only browser acceptance. There is no DefinitionResolver,
+different). R4 adds a SQLite compatibility repository with true SQL CAS and
+default-on canonical routing after activation. The retained Classic/Smart editor
+adapters share persistence, update-message, polling, workflow transfer, execution-result media normalization, media URL normalization/preview routing, media-reference filtering, MIME/extension media-kind classification (also used by the shared MediaRenderer), native-video event isolation, preview-failure fallback binding, native-media playback-state preservation, image-dimension loading/positive field copying, high-resolution candidate collection/async decode preloading, pure intrinsic-media/thumbnail sizing, and pure media-grid fitting, plus a side-effect-free graph fragment for subgraph/clipboard/materialization/removal, NodeShell,
+and renderer seams, but remain duplicate product runtimes. There is no DefinitionResolver,
 SkillRegistry, ProviderConnection or
 ModelAvailability registry, ExecutorRegistry, formal Asset/Artifact/Entity/
 Knowledge runtime, Workflow/Approval/Handoff runtime, or PackageRuntime. R1 adds a
@@ -47,7 +49,7 @@ bounded Codex App Server transport seam, not an execution/domain runtime.
 | Backend seams | `workbench/domain`, `application`, `repositories`, `api`: records, Legacy adapters/repositories, renderer manifests, node/graph services, JSONL audit, `/api/v1` router |
 | Classic Canvas | `static/canvas.html` + `static/js/canvas.js`: broad fixed-node graph editor and Legacy execution/UI |
 | Smart Canvas | `static/smart-canvas.html` + `static/js/smart-canvas.js`: media-first composer and Smart Prompt/Loop/Group/MiniMax execution/UI |
-| Shared Canvas seams | `static/js/workbench/canvas/*.js`: opt-in runtime state, geometry, graph/group intents, creation catalog/client, entry compatibility resolver, NodeShell, renderer registry/host, media/Legacy renderers, Inspector, semantic zoom, screen-space controls |
+| Shared Canvas seams | `static/js/workbench/canvas/*.js`: opt-in runtime state, geometry, graph/group intents, creation catalog/client, entry compatibility resolver (handoff, Canvas-list project memory and URL construction), text-copy fallback/clipboard verification, injected image-size calculation, configurable editable-target detection, media URL normalization/preview routing, MIME/extension media-kind classification, native-video event isolation, preview-failure fallback binding, and high-resolution candidate collection/async decode preloading, NodeShell, renderer registry/host, media/Legacy renderers, Inspector, semantic zoom, screen-space controls |
 | Projects/list | `static/canvas-list.html` + `static/js/canvas-list.js`: still exposes and routes separate Classic/Smart kinds |
 | Provider settings | API settings page and `main.py` routes: provider metadata/model lists, health checks, backend credential writes |
 
@@ -66,7 +68,7 @@ There is no identity provider, worker process, or durable job queue.
 | U4 | complete | Shared creation catalog/IDs and restricted versioned blank/connected paths exist. Classic blank Image/Prompt/Loop/Group/Output and Smart blank Image/Prompt/Loop/Group/MiniMax menu creation can use NodeCreationService only on the explicitly enabled loopback compatibility path. Unmigrated constructors, uploads/imports, menus, and direct Legacy mutations remain compatibility paths. |
 | U5 | complete | Shared result-placement intent and a narrow Classic/Smart compatibility execution wrapper exist. Behavioral tests verify frozen completion metadata, retained-error failure metadata, and both page entries delegating to the wrapper with Legacy fallbacks; Legacy execution remains authoritative. No unified executor adapter/runtime exists. |
 | U6 | complete | Canvas list creates one normal Canvas choice, hides Legacy source-kind labels, and opens `canvas.html` for every record. A shared side-effect-free entry resolver scopes historical Smart handoff to records that require it. One runtime is intentionally not complete until U7. |
-| U7 | in progress | SQLite compatibility persistence, source backup, metadata/list/trash/project-reassignment repository paths, and a double-gated selector exist. Legacy JSON remains active; Classic/Smart duplicate runtime/page removal has not occurred. |
+| U7 | in progress | SQLite compatibility persistence is the default route after activated authority and true SQL CAS. Legacy JSON is bounded import/rollback compatibility. Classic/Smart still retain duplicate construction, rendering, interaction, and execution runtimes, so page/runtime removal and flag retirement are not authorized. |
 
 ### Feature and compatibility gates
 
@@ -78,14 +80,15 @@ Backend defaults:
 - `WORKBENCH_LAN_ENABLED` is false unless host is `0.0.0.0` or `::`.
 - `WORKBENCH_NODE_API_ENABLED` is true only for loopback host values; the `/api/v1`
   router is not registered in LAN mode.
-- `WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED` defaults false. When explicitly true,
-  it selects SQLite compatibility persistence only if SQLite authority state is
-  `sqlite`; the false/default path neither selects nor initializes SQLite.
+- `WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED` defaults true. It selects SQLite
+  compatibility persistence only when explicit SQLite authority state is `sqlite`;
+  explicit false remains the bounded U7 rollback control.
 
-Browser URL gates are all off when absent: `unified_canvas=1`, `node_shell=1`,
-`legacy_renderer=1`, `media_renderer=1`, `semantic_zoom=1`, and
-`screen_space_controls=1`. Renderer/Shell paths also require loopback; semantic zoom
-requires NodeShell. The benchmark harness forwards only this allowlist.
+Browser URL gates are default-on when absent and use explicit `=0` rollback:
+`unified_canvas`, `node_shell`, `legacy_renderer`, `media_renderer`,
+`semantic_zoom`, and `screen_space_controls`. Renderer/Shell paths also require
+loopback; semantic zoom requires NodeShell. The benchmark harness forwards only
+this allowlist.
 
 ## Persistence and record contracts
 
@@ -216,7 +219,7 @@ does not persist raw events, and is not wired into Legacy HTTP routes. The exist
 | Domain | Current authority |
 |---|---|
 | Project | `data/projects.json` via `main.py` remains default page/route authority; SQLite ProjectRecord/ProjectMember records are a verified canonical foundation but not default route authority |
-| Canvas | SQLite authority state is activated after a verified 22-payload backfill/compare. Default page/route runtime remains `data/canvases/*.json`; R4's flag-enabled isolated API/browser acceptance passed, but general cutover is incomplete |
+| Canvas | SQLite CanvasRecord is the default page/route authority after a verified 22-payload backfill/compare and activated authority state. `data/canvases/*.json` is retained only for import/rollback compatibility; Unified Canvas runtime cutover remains incomplete |
 | Node/Edge | Dictionaries embedded in Canvas JSON; NodeRecord/EdgeRecord are views |
 | Asset | Configured asset files plus JSON library/storage/shared-folder metadata; no AssetVersion |
 | Workflow | Mutable `workflows/*.json`/configs plus Canvas archives/library items; no WorkflowVersion/Run |
@@ -270,7 +273,7 @@ subprocess/tool-permission boundary exists.
 ## Performance baseline
 
 R2 latest reran `node tools/benchmark-canvas-payload.mjs`: 9,622 bytes for 100 nodes
-(0.115 ms serialization) and 29,132 bytes for 300 nodes (0.085 ms), with
+(0.108 ms serialization) and 29,132 bytes for 300 nodes (0.096 ms), with
 sub-millisecond serialization. The latest browser
 evidence is `docs/benchmarks/canvas-node-shell-baseline-2026-09-04.md`: its visible
 300-node Safari NodeShell sample recorded load 152 ms, render ready 362 ms, zoom 38
@@ -279,17 +282,17 @@ ms, pan 104 ms, and minimap 15 ms. The earlier offscreen 300-node minimap sample
 single local observations, not release/percentile budgets.
 
 R4 reran the deterministic payload check after enabling the SQLite compatibility
-route in an isolated local process: 9,622 bytes/0.102 ms for 100 nodes and
-29,132 bytes/0.088 ms for 300 nodes. This does not replace browser interaction
+route in an isolated local process: 9,622 bytes/0.142 ms for 100 nodes and
+29,132 bytes/0.090 ms for 300 nodes. This does not replace browser interaction
 acceptance.
 
 ## Legacy monolith responsibility baseline
 
 | File | Size | Responsibilities still present | Already delegated/extracted |
 |---|---:|---|---|
-| `main.py` | 19,466 lines; 868 top-level functions; 77 classes; 165 routes | Composition plus most provider/model/secret/subprocess/generation/chat/project/Canvas/asset/workflow/update/media/queue/event and Legacy API behavior | Node router/services, records/adapters, Legacy repositories, renderer registry, JSONL audit live under `workbench/`; `main.py` wires them |
-| `static/js/canvas.js` | 16,705 lines | Classic create/render/connect/execute, provider UI, graph/save/workflow/asset/log/minimap/selection/geometry behavior | Opt-in runtime, geometry, graph/group intents, catalog/client, records, entry compatibility resolver, NodeShell, renderer host/registry/renderers, Inspector, semantic zoom, screen controls; explicitly enabled blank Output creation delegates through the restricted NodeCreationService path |
-| `static/js/smart-canvas.js` | 20,102 lines | Smart composer/create/render/connect/execute, provider/media/MiniMax, graph/save/group/minimap/selection/geometry behavior | Uses the same opt-in shared modules through adapters; Smart Group/Image/Legacy NodeShell card batches mount through `UnifiedRenderHost`; explicitly enabled blank MiniMax creation delegates through the restricted NodeCreationService path |
+| `main.py` | 18,395 lines; 828 top-level functions; 75 classes; 162 routes | Composition plus most provider/model/secret/subprocess/generation/chat/project/Canvas/asset/workflow/media/queue/event and Legacy API behavior | Node router/services, records/adapters, Legacy repositories, renderer registry, JSONL audit live under `workbench/`; `main.py` wires them. Repository self-update responsibility and runtime GitHub-hosting fallback are removed. |
+| `static/js/canvas.js` | 16,686 lines | Classic create/render/connect/execute, provider UI, graph/save/workflow/asset/log/minimap/selection/geometry behavior | Opt-in runtime, geometry, graph/group intents, catalog/client, records, entry compatibility resolver, NodeShell, renderer host/registry/renderers, Inspector, semantic zoom, screen controls; explicitly enabled blank Output creation delegates through the restricted NodeCreationService path |
+| `static/js/smart-canvas.js` | 20,085 lines | Smart composer/create/render/connect/execute, provider/media/MiniMax, graph/save/group/minimap/selection/geometry behavior | Uses the same opt-in shared modules through adapters; Smart Group/Image/Legacy NodeShell card batches mount through `UnifiedRenderHost`; explicitly enabled blank MiniMax creation delegates through the restricted NodeCreationService path |
 
 R0 added no Workbench business responsibility to these files and removed/delegated
 none; it changed documentation only. R1 adds no Workbench business responsibility to
@@ -302,7 +305,7 @@ construction delegates to the shared entry compatibility resolver.
 ## Verification baseline
 
 - Latest R4 baseline, `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest
-  discover -s tests -q`: 206 tests passed in 1.455 seconds.
+  discover -s tests -q`: 240 tests passed in 2.409 seconds.
 - Python AST: `main.py`, 30 `workbench/**/*.py` files, and two migration/backup
   tools passed (33 files total).
 - JavaScript: 42 files, including Classic, Smart, Canvas-list, and shared Canvas

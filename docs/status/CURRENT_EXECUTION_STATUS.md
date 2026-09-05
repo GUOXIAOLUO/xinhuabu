@@ -63,12 +63,148 @@ the normal Canvas URL as well as the retained adapter URL.
 Canvas list and asset-manager openings now both use the normal `canvas.html`
 entry through the same `normalCanvasUrl` contract; direct Smart page routing is
 confined to the retained compatibility boundary.
+The retained Classic/Smart adapters also delegate Canvas-list project memory and
+encoded list-URL construction to that same entry boundary; this changes no Canvas
+record and leaves their page-specific navigation UI intact.
+Their text-copy fallback and optional secure-context clipboard verification are
+also delegated to a DOM-neutral shared helper; error/modal and page-specific UI
+decisions remain adapter-owned.
+The API image-size calculation now likewise shares only its pure, injected
+algorithm; each adapter retains its own ratio parser, size map, model choice, and
+provider/execution behavior.
+Editable-target detection for keyboard/drag guards now shares its base DOM
+semantics; Smart supplies its retained prompt-control selector while Classic keeps
+its existing narrower selector behavior.
 The asset manager now presents a single business-neutral `画布` category and no
 longer exposes Classic/Smart source labels or filters; retained `kind` is
 compatibility metadata only.
-Classic and Smart workflow import/export now share one transport-only archive
-client for the existing backend contract. Each retained adapter still owns its
-selection payload, node insertion, save scheduling, and UI feedback.
+Classic and Smart workflow import/export now share one archive transport, JSON
+export and import-normalization client for the existing backend contract, plus one
+side-effect-free shared Canvas Graph Fragment for selected-subgraph (including
+clipboard copy), import-graph-materialization (including center-anchored clipboard
+paste), and graph-record removal. Each retained adapter still owns its archive format, node
+serializer/order, page-specific import normalization and selection UI, save
+scheduling, file naming and UI feedback;
+shared download keeps each adapter's fallback filename and revoke timing, while
+shared failure formatting retains the Legacy string, validation-array, and
+nested-detail behavior.
+Classic and Smart also delegate their generic HTTP error parsing to one shared
+Canvas module; provider, execution, and error-presentation decisions remain in the
+retained adapters.
+
+Classic and Smart now also delegate pure media original-URL normalization and
+local `/output`/`/assets` preview routing. Classic retains its remote-media proxy
+and FLV compatibility while Smart retains its display-URL fallback; media HTML,
+interaction, and provider behavior remain adapter-owned.
+
+Their native-video overlay synchronization and event-propagation isolation also
+delegate to one shared helper. The adapters retain their existing overlay selectors,
+binding markers, player activation, and Smart playback-end behavior.
+
+The same helper now binds preview-image load failures: each adapter supplies its
+existing original-URL and video-fallback rules, while shared code performs one-time
+event binding, replacement, and inline-player binding. No media format, player, or
+adapter-specific fallback policy was changed.
+
+Single-image asynchronous load/decode now also has one shared promise helper. Each
+adapter retains its own cache, in-flight de-duplication, viewport gating, selected
+node scope, and high-resolution source policy.
+
+High-resolution candidate scanning and preview/original source switching are now
+shared callback-driven logic. Classic and Smart still provide their own roots,
+viewport test, URL display/proxy policy, caches, and delayed application lifecycle.
+
+Pure media-kind classification now resolves MIME, extensions, and explicit media
+kinds in one shared module. Classic explicitly retains FLV support; Smart retains
+text/workflow classification. Provider, asset-library, and execution behavior remain
+adapter-owned.
+
+The shared MediaRenderer now consumes that same classification boundary for its
+video element choice and Inspector media summary; it no longer keeps a separate
+video/audio regular-expression branch.
+
+Classic and Smart execution-result media extraction now delegates traversal and
+URL de-duplication to one shared pure normalizer. Classic retains its historical
+root-key/string-output contract; Smart retains root-object traversal and positive
+dimension metadata. Execution/provider behavior remains adapter-owned.
+
+Image-dimension load/error handling and positive dimension-field copying now share
+one helper. Smart retains all media layout, grid, and group sizing decisions; Classic
+retains its own display URL choice.
+
+The Smart adapter now delegates its pure square media-grid fitting and deterministic
+candidate scoring to one shared Canvas module. It retains all Smart-specific media
+group membership, grid placement, scroll/overflow treatment, and layout policy; the
+module has no DOM, network, persistence, or execution responsibility.
+
+Intrinsic media-size field selection, aspect-ratio contain fitting, and thumbnail
+minimum-size fallback now share one pure Canvas module. Smart retains the decisions
+to invoke it, audio/default-card exceptions, group policy, and all DOM application.
+
+Native media playback-state capture and restoration now share one Canvas module.
+The adapters retain their own render lifecycle and node/stage transplantation rules;
+the shared contract only preserves time, paused state, rate, mute, and volume across
+their existing re-renders.
+
+Image/video/audio reference filtering and remote video-reference detection now share
+one callback-driven Canvas module. Classic retains FLV-aware classification and its
+image limit; Smart retains its image-disguised-as-video exclusion rule.
+
+Media-reference browser smoke (read-only, isolated `127.0.0.1:3010`): PASS —
+Classic record `bf43426d46e648e2b069f4a2313f4aab` retained its video/image cards
+and ports; the normal Smart URL for `ca914662f0dc4923bd5b60b29eb55b68` handed off
+and retained Composer, Smart group, upload, and video-workflow controls. No
+user-initiated save, create, execution, or deletion occurred; the isolated service
+was stopped after the check.
+
+Playback-state browser smoke (read-only, isolated `127.0.0.1:3010`): PASS — the
+Classic local-video card remained readable with native media controls and NodeShell
+ports; the normal Smart URL for `ca914662f0dc4923bd5b60b29eb55b68` handed off and
+retained Composer, Smart group, upload, and video-workflow controls. No
+user-initiated save, create, execution, or deletion occurred; the isolated service
+was stopped after the check.
+
+Intrinsic-media layout browser smoke (read-only, isolated `127.0.0.1:3010`): PASS
+— Classic record `bf43426d46e648e2b069f4a2313f4aab` retained its local video/image
+cards and NodeShell ports; the normal Smart URL for
+`ca914662f0dc4923bd5b60b29eb55b68` handed off and retained Composer, Smart group,
+upload, and video-workflow controls. No user-initiated save, create, execution, or
+deletion occurred; the isolated service was stopped after the check.
+
+Media-grid browser smoke (read-only, isolated `127.0.0.1:3010`): PASS — Classic
+record `bf43426d46e648e2b069f4a2313f4aab` rendered the existing local video/image
+cards and NodeShell ports; the normal Smart URL for
+`ca914662f0dc4923bd5b60b29eb55b68` handed off and retained Composer, Smart group,
+upload, and video-workflow controls. No user-initiated save, create, execution, or
+deletion occurred; the isolated service was stopped after the check.
+
+Dimension-helper browser smoke (read-only, isolated `127.0.0.1:3010`): PASS —
+Classic record `bf43426d46e648e2b069f4a2313f4aab` rendered its existing local
+image/video cards and NodeShell ports; the normal Smart URL for
+`ca914662f0dc4923bd5b60b29eb55b68` handed off and retained Composer, Smart group,
+upload, and video-workflow controls. No save, create, execution, deletion, or other
+Canvas mutation was invoked; the isolated service was stopped after the check.
+
+Execution-result media-normalizer browser smoke (read-only, isolated
+`127.0.0.1:3010`): PASS — Classic record
+`bf43426d46e648e2b069f4a2313f4aab` loaded its NodeShell-ready local video/image
+cards; the normal Smart URL for `ca914662f0dc4923bd5b60b29eb55b68` handed off and
+retained Composer, Smart group, upload, and video-workflow controls. No save,
+create, execution, deletion, or other Canvas mutation was invoked; the isolated
+service was stopped after the check.
+Legacy source-repository self-update responsibility has been removed from both
+`main.py` and the home shell; the runtime no longer exposes update routes, source
+repository URLs, update download/staging, self-restart, or update rollback logic.
+The only remaining runtime GitHub-hosted fallback, a RunningHub model-registry raw
+URL, has also been removed. RunningHub model discovery now uses its official OpenAPI,
+an optional installed local snapshot, then the existing built-in fallback; Workbench
+runtime source guards prohibit GitHub hosting URLs in `main.py`, the home shell,
+Canvas-list, both Canvas entries/adapters, and shared Canvas modules. A retained
+third-party LTX extension link is outside this Workbench runtime guard and remains
+unchanged in R4.
+An isolated restart/read check on `127.0.0.1:3006` returned local-only `/api/app-info`
+and served an index shell with none of the removed self-update endpoints or source
+repository URL tokens.
 An automated source-reference guard verifies that Canvas list, asset manager, and
 the Canvas editor contain no direct Smart page URL; only the compatibility module
 may construct that historical deep link.
@@ -96,7 +232,7 @@ diagnostic exists.
 | U4 | complete | Shared catalog and restricted versioned creation/graph APIs are used by Classic blank Image/Prompt/Loop/Group/Output and Smart blank Image/Prompt/Loop/Group/MiniMax menus when explicitly enabled on loopback. Unmigrated page-owned constructors/imports remain compatibility paths. |
 | U5 | complete | Shared result-placement intent and narrow Classic/Smart compatibility wrapper preserve Legacy execution. Behavioral tests cover frozen completion metadata, retained-error failure metadata, and both page-entry fallbacks. No unified executor runtime exists. |
 | U6 | complete | Canvas list exposes one normal creation choice, hides source-kind labels, and opens one normal `canvas.html` entry; a side-effect-free resolver scopes historical Smart handoff to its retained compatibility adapter. |
-| U7 | in_progress | SQLite is the default canonical page/route persistence after validated authority activation; retained Classic/Smart adapters now use one neutral CanvasRecord load/save/metadata client, version-poll coordinator, transport-neutral update-message filter, and workflow archive transport client while preserving their polling, merge, selection, insertion, and UI behavior. Shared state, NodeShell base, MediaRenderer, LegacyRenderer, semantic zoom, and Smart screen-space controls are default-on with explicit `unified_canvas=0` / `node_shell=0` / `media_renderer=0` / `legacy_renderer=0` / `semantic_zoom=0` / `screen_space_controls=0` rollback. Canvas list and asset manager use the normal entry; the asset manager presents one neutral `画布` category, while source guards confine Smart URLs and handoff decisions to the compatibility module. Default-path browser reads and the all-zero rollback both passed for Classic and historical Smart, and the Smart handoff preserves the rollback query. Isolated browser creation, restart, stale-conflict, and lossless rollback export are tested. Duplicate runtime/page removal and final flag removal remain pending. |
+| U7 | in_progress | SQLite is the default canonical page/route persistence after validated authority activation; retained Classic/Smart adapters now use one neutral CanvasRecord load/save/metadata client, version-poll coordinator, transport-neutral update-message filter, workflow archive transport/JSON-export/import-normalization client, side-effect-free Canvas Graph Fragment for selected-subgraph (including clipboard copy)/import-graph-materialization (including center-anchored clipboard paste)/graph-record removal, generic HTTP error parser, shared text-copy fallback/clipboard verification, and media original-URL/preview routing, callback-driven media-reference filtering, MIME/extension media-kind classification (also used by MediaRenderer), native-video event isolation, preview-failure fallback binding, native-media playback-state preservation, high-resolution candidate collection, single-image async decode preloading, pure intrinsic-media/thumbnail sizing, and pure media-grid fitting while preserving their polling, merge, archive format, node serialization/order, page-specific import normalization/selection UI, media display/proxy rules, Classic FLV classification/image limits, Smart image-disguised-as-video exclusion, player activation, render lifecycle and node/stage transplantation policy, cache/scope/delayed application policy, Smart default/audio card treatment and group/grid placement and overflow policy, download, provider, execution, and UI behavior. Canvas-list project memory and encoded list-URL construction also use the same side-effect-free entry boundary. Shared state, NodeShell base, MediaRenderer, LegacyRenderer, semantic zoom, and Smart screen-space controls are default-on with explicit `unified_canvas=0` / `node_shell=0` / `legacy_renderer=0` / `media_renderer=0` / `semantic_zoom=0` / `screen_space_controls=0` rollback. Canvas list and asset manager use the normal entry; the asset manager presents one neutral `画布` category, while source guards confine Smart URLs and handoff decisions to the compatibility module. Default-path browser reads and the all-zero rollback both passed for Classic and historical Smart, and the Smart handoff preserves the rollback query. Isolated browser creation, restart, stale-conflict, and lossless rollback export are tested. Duplicate runtime/page removal and final flag removal remain pending. |
 
 ## Verified authority map
 
@@ -192,7 +328,7 @@ Command:
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -q
 ```
 
-Result: PASS after current R4 work — 221 tests in 1.591 seconds, Python 3.14.7.
+Result: PASS after current R4 work — 240 tests in 2.409 seconds, Python 3.14.7.
 
 R4 canonical-routing local acceptance:
 
@@ -255,11 +391,26 @@ Canvas-list entry, Classic record `7ed83bf56f234d77a9e67ae1f6496577` remained at
 `/static/smart-canvas.html` compatibility page. No Canvas data or execution was
 mutated.
 
+Shared-entry browser recheck (read-only, isolated `127.0.0.1:3010` server): PASS
+— the normal `canvas.html` URL for historical Smart record
+`ca914662f0dc4923bd5b60b29eb55b68` handed off to its retained Smart adapter with
+the existing two nodes and workflow controls visible. This verifies the shared
+Canvas-list project-memory/URL module after its cache-version update; no Canvas
+data or execution was mutated.
+
 Shared-render browser acceptance (read-only, same local server): PASS — the same
 Classic and Smart records loaded with `unified_canvas=1`, `node_shell=1`, both
 renderer flags, `semantic_zoom=1`, and `screen_space_controls=1`. Both displayed
 shared NodeShell ready state, generic ports, and semantic summary controls; no
 Canvas data or execution was mutated.
+
+Current-worktree browser recheck (read-only, isolated `127.0.0.1:3011` server):
+PASS — Classic record `bf43426d46e648e2b069f4a2313f4aab` remained on the normal
+entry with four ready NodeShell cards, media controls, and generic ports. Historical
+Smart record `ca914662f0dc4923bd5b60b29eb55b68` entered via that same URL, handed
+off to its retained adapter, and displayed its Smart composer, template entry,
+workflow controls, and two nodes. No Canvas data or execution was mutated; the
+temporary server was stopped.
 
 Default-on `unified_canvas` browser recheck (read-only, isolated
 `127.0.0.1:3005` server): PASS — Classic record
@@ -306,6 +457,99 @@ opened through the normal `canvas.html` URL with all six explicit zero flags; th
 handoff retained every flag in its `smart-canvas.html` URL and restored the
 retained non-NodeShell presentation. Neither Canvas was saved, created, or
 executed.
+
+Current-worktree all-zero rollback recheck (read-only, isolated
+`127.0.0.1:3010`): PASS — Classic record
+`bf43426d46e648e2b069f4a2313f4aab` rendered its retained non-NodeShell cards;
+its existing video preview fallback received a `415` preview response and retained
+native video controls. Historical Smart record `ca914662f0dc4923bd5b60b29eb55b68`
+opened through the same normal URL, preserved all six zero flags during handoff,
+and rendered its retained group, upload, and Skill controls. No user-initiated
+save, create, execution, or deletion occurred; the isolated service was stopped.
+
+Current-worktree browser recheck (read-only, isolated `127.0.0.1:3008`): PASS —
+the normal Classic URL for `7ed83bf56f234d77a9e67ae1f6496577` rendered its title,
+six nodes, NodeShell-ready cards, and generic ports. The normal Smart URL for
+`ca914662f0dc4923bd5b60b29eb55b68` handed off to the retained adapter and rendered
+the Smart composer, Smart group, upload node, and Skill node. Reopening the same
+Smart record with all six explicit zero flags preserved every rollback parameter
+through the handoff and rendered the retained legacy controls. No create, save,
+generation, delete, or other Canvas mutation was invoked; the isolated service was
+stopped after verification.
+
+Workflow-dialog browser follow-up on the same local fixture is intentionally not
+accepted as read-only evidence: selecting one Classic node showed a newer
+`updated_at`, even though the direct Classic/Smart selection handlers have a focused
+contract prohibiting `scheduleSave()`. The source of that metadata update was not
+attributed during the attempt, so no export was triggered and the service was
+stopped. Repeat workflow UI export only against a process-lifetime temporary SQLite
+fixture before using it as R4 acceptance evidence.
+
+Workflow UI export browser acceptance (isolated `127.0.0.1:3009` temporary
+SQLite authority): PASS — one seeded Classic and one seeded Smart Canvas each
+selected one node and opened the workflow dialog from the normal Canvas entry.
+Both exposed `已选择 1 个节点，0 条连线`; Classic JSON export completed, and Smart
+explicitly reported `已导出智能画布工作流 JSON`. No import, execution, or user Canvas
+was used. The fixture service was stopped; after environment deletion protection
+initially rejected a force-delete, its isolated temporary directory was moved to the
+local Trash and is recoverable.
+
+Media URL shared-boundary browser smoke (read-only, isolated `127.0.0.1:3010`):
+PASS — Classic record `bf43426d46e648e2b069f4a2313f4aab` rendered its existing
+local video and image through the shared `media-url.js` module, with NodeShell-ready
+cards and generic ports. Opening historical Smart record
+`ca914662f0dc4923bd5b60b29eb55b68` through the normal Canvas URL handed off to its
+retained adapter and preserved the Composer, Smart group, upload node, and video
+workflow node. No save, create, execution, deletion, or other Canvas mutation was
+invoked; the isolated service was stopped after the smoke check.
+
+Native-video shared-control browser smoke (read-only, isolated `127.0.0.1:3010`):
+PASS — Classic record `bf43426d46e648e2b069f4a2313f4aab` loaded its local video
+controls and media/image cards after `media-preview-controls.js` loaded. Historical
+Smart record `ca914662f0dc4923bd5b60b29eb55b68` again handed off from the normal URL
+and retained its Composer, Smart group, upload, and video workflow controls. No
+save, create, execution, deletion, or other Canvas mutation was invoked; the
+isolated service was stopped after verification.
+
+Preview-fallback shared-control browser smoke (read-only, isolated
+`127.0.0.1:3010`): PASS — Classic record
+`bf43426d46e648e2b069f4a2313f4aab` retained its existing local video and image
+cards; the normal URL for historical Smart record
+`ca914662f0dc4923bd5b60b29eb55b68` again handed off and retained Composer, Smart
+group, upload, and video-workflow controls. No save, create, execution, deletion,
+or other Canvas mutation was invoked; the isolated service was stopped after the
+check.
+
+High-resolution candidate shared-helper browser smoke (read-only, isolated
+`127.0.0.1:3010`): PASS — Classic record
+`bf43426d46e648e2b069f4a2313f4aab` retained its local video/image cards and
+NodeShell ports; the normal Smart URL for `ca914662f0dc4923bd5b60b29eb55b68`
+handed off and retained Composer, Smart group, upload, and video-workflow controls.
+No save, create, execution, deletion, or other Canvas mutation was invoked; the
+isolated service was stopped after the check.
+
+MediaRenderer classification browser smoke (read-only, isolated
+`127.0.0.1:3010`): PASS — Classic record
+`bf43426d46e648e2b069f4a2313f4aab` rendered its NodeShell-ready local video/image
+cards; historical Smart record `ca914662f0dc4923bd5b60b29eb55b68` handed off from
+the normal URL and retained Composer, Smart group, upload, and video-workflow
+controls. No save, create, execution, deletion, or other Canvas mutation was
+invoked; the isolated service was stopped after the check.
+
+Media-kind shared-module browser smoke (read-only, isolated `127.0.0.1:3010`):
+PASS — Classic record `bf43426d46e648e2b069f4a2313f4aab` retained its video and
+image cards; the normal URL for Smart record `ca914662f0dc4923bd5b60b29eb55b68`
+handed off and retained Composer, Smart group, upload, and video-workflow controls.
+No save, create, execution, deletion, or other Canvas mutation was invoked; the
+isolated service was stopped after the check.
+
+Async-decode shared-helper browser smoke (read-only, isolated `127.0.0.1:3010`):
+PASS — Classic record `bf43426d46e648e2b069f4a2313f4aab` completed media-card
+rendering with its existing local image/video; the normal Smart URL for historical
+record `ca914662f0dc4923bd5b60b29eb55b68` handed off and preserved Composer, Smart
+group, upload, and video-workflow controls. No save, create, execution, deletion,
+or other Canvas mutation was invoked; the isolated service was stopped after the
+check.
 
 R1 focused command:
 
@@ -363,8 +607,8 @@ Command:
 node tools/benchmark-canvas-payload.mjs
 ```
 
-Result: PASS/reproduced for R4 — 100 nodes = 9,622 bytes (0.102 ms serialization);
-300 nodes = 29,132 bytes (0.088 ms serialization). This is deterministic payload
+Result: PASS/reproduced for current R4 worktree — 100 nodes = 9,622 bytes (0.108 ms serialization);
+300 nodes = 29,132 bytes (0.096 ms serialization). This is deterministic payload
 construction, not a browser interaction budget.
 
 Latest available browser record:
@@ -395,9 +639,9 @@ follow-up. All are single local samples, not percentile/release commitments.
 
 ### `main.py`
 
-- Size/profile: 19,466 lines; 868 top-level functions; 77 classes; 165 route
+- Size/profile: 18,397 lines; 828 top-level functions; 75 classes; 162 route
   decorators. It still owns most backend provider/model/secret/subprocess,
-  generation/chat, project/Canvas, asset/workflow/update/media/queue/event, and
+  generation/chat, project/Canvas, asset/workflow/media/queue/event, and
   Legacy API behavior.
 - Already delegated: record/adapter/repository contracts, RendererRegistry,
   NodeCreation/Mutation/GraphMutation, JSONL audit sink, and `/api/v1` node router
@@ -406,11 +650,13 @@ follow-up. All are single local samples, not percentile/release commitments.
 - R4 responsibilities removed/delegated: Canvas metadata writes, listing, expired
   trash cleanup, project-delete reassignment, and media-reference diagnostics now
   delegate through the CanvasRepository contract; canonical SQLite compatibility
-  persistence remains under `workbench/`, while `main.py` only composes it.
+  persistence remains under `workbench/`, while `main.py` only composes it. The
+  Legacy repository self-update, staging, self-restart, rollback, source URL, and
+  GitHub-hosted model-registry fallback responsibility have been removed.
 
 ### `static/js/canvas.js`
 
-- Size/profile: 16,705 lines. It still owns Classic construction/render/connect/
+- Size/profile: 16,686 lines. It still owns Classic construction/render/connect/
   execution, provider controls, graph/save/conflict, workflow/assets/logs, minimap,
   selection, drag, resize, and page adaptation.
 - Already delegated: opt-in runtime, geometry, graph/group intents, creation
@@ -426,7 +672,7 @@ follow-up. All are single local samples, not percentile/release commitments.
 
 ### `static/js/smart-canvas.js`
 
-- Size/profile: 20,082 lines. It still owns Smart composer, construction/render/
+- Size/profile: 20,085 lines. It still owns Smart composer, construction/render/
   connect/execution, provider/media/MiniMax, graph/save/conflict, groups, minimap,
   selection, drag, resize, and page adaptation.
 - Already delegated: consumes the same opt-in shared Canvas modules as Classic.
@@ -437,6 +683,26 @@ follow-up. All are single local samples, not percentile/release commitments.
   delegate to shared `WorkbenchCanvasPortCompatibility`; its primary generation
   entry delegates through `WorkbenchCanvasExecutionCompatibility`; Smart Group/Image/Legacy
   NodeShell card batches delegate to `UnifiedRenderHost.mountAdapterCards`.
+
+### U7 duplicate-runtime exit inventory
+
+- Shared now: canonical Canvas persistence/CAS, remote-update filtering and polling,
+  archive transport, HTTP error formatting, pure media URL normalization/preview
+  routing, native-video event isolation, preview-failure fallback binding, and
+  MIME/extension media-kind classification, high-resolution candidate collection,
+  and async decode preloading, pure graph fragment operations, common
+  NodeShell/render host, generic ports, semantic presentation, and screen controls.
+- Smart-only still product-relevant: composer and dynamic provider/media controls,
+  prompt preset/template and asset-library UX, image edit/crop/draw/grid/panorama
+  tools, Smart group media actions, and Smart-specific cascade/execution UI.
+- Classic-only still product-relevant: provider-shaped generator/LLM/Comfy/Video/
+  MiniMax/LTX/RunningHub cards, Classic output/log/asset management, and Classic
+  cascade/execution UI.
+
+Consequently, U7 cannot delete either Runtime/page or retire UI flags until each
+listed product-relevant responsibility has an accepted shared replacement or an
+explicit bounded compatibility adapter with focused interaction, browser, rollback,
+and source-reference evidence.
 
 ## Blockers
 

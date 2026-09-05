@@ -461,92 +461,32 @@ function trf(key, values={}){
     return Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), tr(key));
 }
 function copyTextWithCopyEvent(value){
-    let handled = false;
-    const onCopy = event => {
-        event.preventDefault();
-        event.clipboardData?.setData('text/plain', value);
-        handled = true;
-    };
-    document.addEventListener('copy', onCopy);
-    try {
-        return document.execCommand('copy') && handled;
-    } catch(_) {
-        return false;
-    } finally {
-        document.removeEventListener('copy', onCopy);
-    }
+    return WorkbenchCanvasClipboard.copyWithCopyEvent(value);
 }
 function copyTextWithTextarea(value){
-    let ta = null;
-    try {
-        ta = document.createElement('textarea');
-        ta.value = value;
-        ta.setAttribute('readonly', '');
-        ta.style.position = 'fixed';
-        ta.style.left = '-9999px';
-        ta.style.top = '0';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.focus({preventScroll:true});
-        ta.select();
-        ta.setSelectionRange(0, ta.value.length);
-        return document.execCommand('copy');
-    } catch(_) {
-        return false;
-    } finally {
-        ta?.remove();
-    }
+    return WorkbenchCanvasClipboard.copyWithTextarea(value);
 }
 async function clipboardMatchesText(value){
-    try {
-        if(navigator.clipboard?.readText && window.isSecureContext){
-            return (await navigator.clipboard.readText()) === value;
-        }
-    } catch(_) {}
-    return null;
+    return WorkbenchCanvasClipboard.matchesText(value);
 }
 async function copyTextToClipboard(text){
-    const value = String(text || '');
-    if(!value) return false;
-    if(copyTextWithCopyEvent(value) || copyTextWithTextarea(value)){
-        const verified = await clipboardMatchesText(value);
-        return verified !== false;
-    }
-    try {
-        if(navigator.clipboard?.writeText && window.isSecureContext !== false){
-            await navigator.clipboard.writeText(value);
-            const verified = await clipboardMatchesText(value);
-            return verified !== false;
-        }
-    } catch(_) {}
-    return false;
+    return WorkbenchCanvasClipboard.copyText(text);
 }
 function refreshIcons(){ if(window.lucide) lucide.createIcons(); }
 function uid(prefix){ return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`; }
 function escapeHtml(str){ return String(str == null ? '' : str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
 const escapeAttr = escapeHtml;
 function smartOriginalMediaUrl(itemOrUrl){
-    const raw = typeof itemOrUrl === 'string' ? itemOrUrl : (itemOrUrl?.url || '');
-    const text = String(raw || '');
-    if(!text) return '';
-    try {
-        const parsed = new URL(text, window.location.origin);
-        if(parsed.pathname === '/api/media-preview'){
-            const original = parsed.searchParams.get('url') || '';
-            return original || text;
-        }
-    } catch(e) {}
-    return text;
+    return window.WorkbenchCanvasMediaUrl.originalUrl(itemOrUrl, window.location.origin);
 }
 function smartMediaPreviewUrl(itemOrUrl, size=512){
     const raw = smartOriginalMediaUrl(itemOrUrl);
     const displayItem = typeof itemOrUrl === 'object' && itemOrUrl ? {...itemOrUrl, url:raw} : raw;
-    const displayUrl = displayMediaUrl(displayItem);
-    if(!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return displayUrl;
-    if(!raw.startsWith('/output/') && !raw.startsWith('/assets/')) return displayUrl;
-    if(!/\.(png|jpe?g|webp|gif|bmp|avif|tiff?|mp4|webm|mov|m4v|avi|mkv)(\?|#|$)/i.test(raw)) return displayUrl;
-    const width = Math.max(64, Math.min(2048, Math.round(Number(size) || 512)));
-    return `/api/media-preview?w=${width}&url=${encodeURIComponent(raw)}`;
+    return window.WorkbenchCanvasMediaUrl.previewUrl(raw, {
+        locationOrigin:window.location.origin,
+        size,
+        displayUrl:() => displayMediaUrl(displayItem),
+    });
 }
 function smartPreviewImgHtml(itemOrUrl, size=512, attrs=''){
     const original = smartOriginalMediaUrl(itemOrUrl);
@@ -555,13 +495,7 @@ function smartPreviewImgHtml(itemOrUrl, size=512, attrs=''){
 }
 function loadSmartOriginalImageDimensions(url){
     const src = displayMediaUrl({url:smartOriginalMediaUrl(url)});
-    if(!src || /^data:/i.test(src) || /^blob:/i.test(src)) return Promise.resolve(null);
-    return new Promise(resolve => {
-        const img = new Image();
-        img.onload = () => resolve(img.naturalWidth && img.naturalHeight ? {w:img.naturalWidth, h:img.naturalHeight} : null);
-        img.onerror = () => resolve(null);
-        img.src = src;
-    });
+    return window.WorkbenchCanvasMediaPreviewControls.loadImageDimensions(src);
 }
 function smartVideoPreviewHtml(itemOrUrl, size=512, attrs=''){
     const original = smartOriginalMediaUrl(itemOrUrl);
@@ -579,20 +513,10 @@ function smartVideoPlayerHtml(url, attrs=''){
     return `<video src="${safe}" data-url="${escapeAttr(original)}" data-inline-video-active="1" controls autoplay playsinline preload="metadata" disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"${attrs ? ` ${attrs}` : ''}></video>`;
 }
 function bindSmartVideoOverlay(video){
-    if(!video || video.dataset.smartVideoOverlayBound === '1') return;
-    video.dataset.smartVideoOverlayBound = '1';
-    const sync = () => {
-        const overlay = video.parentElement?.querySelector?.('.smart-video-play');
-        if(overlay) overlay.style.display = !video.paused && !video.ended ? 'none' : '';
-    };
-    ['play', 'playing', 'pause', 'ended'].forEach(type => video.addEventListener(type, sync));
-    // Native controls are interactive content, not Canvas selection targets.
-    // Let the browser perform its default play/seek action while keeping the
-    // matching pointer lifecycle out of the node/card event handlers.
-    ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'wheel'].forEach(type => {
-        video.addEventListener(type, event => event.stopPropagation());
+    return window.WorkbenchCanvasMediaPreviewControls.bindVideoOverlay(video, {
+        boundKey:'smartVideoOverlayBound',
+        overlaySelector:'.smart-video-play',
     });
-    sync();
 }
 function smartMinimaxVideoPlayerHtml(url){
     const original = smartOriginalMediaUrl(url);
@@ -642,22 +566,11 @@ function isSmartPreviewImage(img){
         && img.getAttribute('src') !== img.dataset.originalSrc;
 }
 function bindSmartPreviewImageFallbacks(root=document){
-    root.querySelectorAll?.('img[data-preview-src][data-original-src]:not([data-preview-fallback-bound])').forEach(img => {
-        img.dataset.previewFallbackBound = '1';
-        img.addEventListener('error', () => {
-            const original = img.dataset.originalSrc || '';
-            if(img.dataset.previewKind === 'video'){
-                const tpl = document.createElement('template');
-                tpl.innerHTML = smartVideoFallbackHtml(original, img.dataset.videoFallbackAttrs || '');
-                const video = tpl.content.firstElementChild;
-                img.replaceWith(video);
-                bindSmartVideoOverlay(video);
-                return;
-            }
-            if(original && img.getAttribute('src') !== original) img.src = original;
-        });
+    return window.WorkbenchCanvasMediaPreviewControls.bindPreviewImageFallbacks(root, {
+        originalUrl:img => img.dataset.originalSrc || '',
+        videoFallbackHtml:smartVideoFallbackHtml,
+        bindVideoOverlay:bindSmartVideoOverlay,
     });
-    root.querySelectorAll?.('video[data-inline-video-active]').forEach(bindSmartVideoOverlay);
 }
 const SMART_SELECTED_HIGH_RES_DELAY = 320;
 const SMART_HIGH_RES_ZOOM_THRESHOLD = 0.86;
@@ -673,17 +586,12 @@ function smartImageEditorIsOpen(){
 function preloadSmartSelectedHighRes(src){
     if(!src || smartSelectedHighResLoaded.has(src)) return Promise.resolve(true);
     if(smartSelectedHighResLoading.has(src)) return smartSelectedHighResLoading.get(src);
-    const task = new Promise(resolve => {
-        const img = new Image();
-        img.decoding = 'async';
-        img.onload = async () => {
-            try { if(img.decode) await img.decode(); } catch(e) {}
-            smartSelectedHighResLoaded.add(src);
-            resolve(true);
-        };
-        img.onerror = () => resolve(false);
-        img.src = src;
-    }).finally(() => smartSelectedHighResLoading.delete(src));
+    const task = window.WorkbenchCanvasMediaPreviewControls.preloadImage(src)
+        .then(loaded => {
+            if(loaded) smartSelectedHighResLoaded.add(src);
+            return loaded;
+        })
+        .finally(() => smartSelectedHighResLoading.delete(src));
     smartSelectedHighResLoading.set(src, task);
     return task;
 }
@@ -713,28 +621,13 @@ function smartImageNearViewport(img){
         && rect.bottom >= shellRect.top - margin && rect.top <= shellRect.bottom + margin;
 }
 function syncSmartSelectedImageResolution(root=null){
-    const selectedImages = [];
-    const wantHighRes = smartViewportWantsHighRes();
-    smartNodeElementsForHighResSync(root).forEach(scope => {
-        scope.querySelectorAll?.('img[data-preview-src][data-original-src]').forEach(img => {
-            if(img.dataset.previewKind === 'video') return;
-            const preview = img.dataset.previewSrc || '';
-            const original = img.dataset.originalSrc || '';
-            if(!wantHighRes || !smartImageNearViewport(img)){
-                delete img.dataset.selectedHighResTarget;
-                if(preview && img.getAttribute('src') !== preview) img.src = preview;
-                return;
-            }
-            const target = displayMediaUrl({url:smartOriginalMediaUrl(original)});
-            if(!target) return;
-            img.dataset.selectedHighResTarget = target;
-            if(smartSelectedHighResLoaded.has(target)){
-                if(img.getAttribute('src') !== target) img.src = target;
-                return;
-            }
-            if(preview && img.getAttribute('src') !== preview) img.src = preview;
-            selectedImages.push({img, target});
-        });
+    const selectedImages = window.WorkbenchCanvasMediaPreviewControls.collectHighResCandidates({
+        roots:smartNodeElementsForHighResSync(root),
+        wantHighRes:smartViewportWantsHighRes(),
+        isNearViewport:smartImageNearViewport,
+        originalUrl:img => img.dataset.originalSrc || '',
+        resolveTarget:original => displayMediaUrl({url:smartOriginalMediaUrl(original)}),
+        isLoaded:target => smartSelectedHighResLoaded.has(target),
     });
     if(smartSelectedHighResTimer) clearTimeout(smartSelectedHighResTimer);
     const seq = ++smartSelectedHighResSeq;
@@ -830,48 +723,10 @@ function canvasForStorage(){
     return clean;
 }
 function apiErrorMessage(data, fallback='请求失败'){
-    if(!data) return fallback;
-    if(typeof data === 'string') return data || fallback;
-    const detail = data.detail ?? data.error ?? data.message;
-    if(typeof detail === 'string') return detail || fallback;
-    if(Array.isArray(detail)){
-        const messages = detail.map(item => {
-            if(typeof item === 'string') return item;
-            const loc = Array.isArray(item?.loc) ? item.loc.filter(x => x !== 'body').join('.') : '';
-            const msg = item?.msg || item?.message || JSON.stringify(item);
-            return loc ? `${loc}: ${msg}` : msg;
-        }).filter(Boolean);
-        return messages.join('\n') || fallback;
-    }
-    if(detail && typeof detail === 'object') return detail.message || detail.msg || JSON.stringify(detail);
-    try {
-        return JSON.stringify(data);
-    } catch(e) {
-        return fallback;
-    }
+    return window.WorkbenchCanvasHttpError.message(data, fallback);
 }
 async function responseErrorMessage(response, fallback='请求失败'){
-    try {
-        const data = await response.clone().json();
-        return apiErrorMessage(data, fallback);
-    } catch(e) {
-        try {
-            const text = await response.text();
-            return text || fallback;
-        } catch(_) {
-            return fallback;
-        }
-    }
-}
-function downloadBlob(blob, filename){
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename || 'smart-canvas-workflow.json';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 800);
+    return window.WorkbenchCanvasHttpError.responseMessage(response, fallback);
 }
 function smartWorkflowFilename(ext='json'){
     const title = (canvas?.title || document.getElementById('smartTitle')?.textContent || 'smart-canvas').trim();
@@ -905,27 +760,20 @@ function serializableSmartNode(node){
     return copy;
 }
 function selectedSmartWorkflowPayload(){
-    const ids = selectedNodeIds();
-    const idSet = new Set(ids);
-    const selectedNodes = nodes.filter(node => idSet.has(node.id)).map(serializableSmartNode);
-    const selectedSet = new Set(selectedNodes.map(node => node.id));
-    const selectedConnections = (canvas?.connections || [])
-        .filter(conn => selectedSet.has(conn.from) && selectedSet.has(conn.to))
-        .map(conn => JSON.parse(JSON.stringify(conn)));
+    const subgraph = window.WorkbenchCanvasGraphFragment.selectedSubgraph({
+        nodes,
+        connections:canvas?.connections || [],
+        selectedIds:selectedNodeIds(),
+        serializeNode:serializableSmartNode,
+    });
     return {
         format:'infinite-smart-canvas-workflow',
         version:1,
         canvas_type:'smart',
         exported_at:Date.now(),
-        nodes:selectedNodes,
-        connections:selectedConnections
+        nodes:subgraph.nodes,
+        connections:subgraph.connections
     };
-}
-function normalizeImportedSmartWorkflow(data){
-    if(Array.isArray(data)) return {nodes:data, connections:[]};
-    if(Array.isArray(data?.nodes)) return {nodes:data.nodes, connections:Array.isArray(data.connections) ? data.connections : []};
-    if(Array.isArray(data?.workflow?.nodes)) return {nodes:data.workflow.nodes, connections:Array.isArray(data.workflow.connections) ? data.workflow.connections : []};
-    return {nodes:[], connections:[]};
 }
 function openSmartWorkflowTransferModal(){
     if(!canvas){ toast('请先打开画布'); return; }
@@ -958,7 +806,7 @@ async function exportSelectedSmartWorkflow(includeResources=false){
     }
     try {
         if(!includeResources){
-            downloadBlob(new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'}), smartWorkflowFilename('json'));
+            window.WorkbenchCanvasWorkflowTransfer.downloadBlob(window.WorkbenchCanvasWorkflowTransfer.jsonExportBlob(payload), smartWorkflowFilename('json'), {fallbackFilename:'smart-canvas-workflow.json', revokeAfterMs:800});
             toast('已导出智能画布工作流 JSON');
             return;
         }
@@ -967,7 +815,7 @@ async function exportSelectedSmartWorkflow(includeResources=false){
             smartWorkflowExportMeta.textContent = '正在打包资源...';
         }
         const filename = smartWorkflowFilename('zip');
-        downloadBlob(await window.WorkbenchCanvasWorkflowTransfer.exportArchive(payload, filename), filename);
+        window.WorkbenchCanvasWorkflowTransfer.downloadBlob(await window.WorkbenchCanvasWorkflowTransfer.exportArchive(payload, filename), filename, {fallbackFilename:'smart-canvas-workflow.json', revokeAfterMs:800});
         if(smartWorkflowExportMeta){
             smartWorkflowExportMeta.classList.remove('busy');
             smartWorkflowExportMeta.classList.add('success');
@@ -987,25 +835,21 @@ function insertSmartWorkflowIntoCanvas(imported){
     const srcConnections = (imported.connections || []).filter(Boolean);
     if(!canvas || !srcNodes.length) throw new Error('工作流中没有可导入的节点');
     pushUndo();
-    const minX = Math.min(...srcNodes.map(n => Number(n.x || 0)));
-    const minY = Math.min(...srcNodes.map(n => Number(n.y || 0)));
     const target = viewportCenter();
-    const dx = target.x - minX;
-    const dy = target.y - minY;
-    const idMap = new Map();
-    const newNodes = srcNodes.map(source => {
-        const copy = serializableSmartNode(source);
-        const oldId = copy.id || uid(copy.type || 'smart');
-        copy.id = uid(copy.type || 'smart');
-        copy.x = Number(copy.x || 0) + dx;
-        copy.y = Number(copy.y || 0) + dy;
-        copy.created_at = copy.created_at || Date.now();
-        idMap.set(oldId, copy.id);
-        return normalizeLegacySmartNode(copy);
-    }).filter(Boolean);
-    const newConnections = srcConnections
-        .map(conn => ({...JSON.parse(JSON.stringify(conn)), from:idMap.get(conn.from), to:idMap.get(conn.to)}))
-        .filter(conn => conn.from && conn.to);
+    const materialized = window.WorkbenchCanvasGraphFragment.materializeImportedSubgraph({
+        nodes:srcNodes,
+        connections:srcConnections,
+        target,
+        serializeNode:serializableSmartNode,
+        createNodeId:type => uid(type || 'smart'),
+        prepareNode:copy => {
+            copy.created_at = copy.created_at || Date.now();
+            return normalizeLegacySmartNode(copy);
+        },
+        createConnection:(connection, endpoints) => ({...JSON.parse(JSON.stringify(connection)), ...endpoints}),
+    });
+    const newNodes = materialized.nodes;
+    const newConnections = materialized.connections;
     nodes.push(...newNodes);
     canvas.connections = [...(canvas.connections || []), ...newConnections];
     selectedIds = newNodes.length > 1 ? newNodes.map(node => node.id) : [];
@@ -1021,7 +865,7 @@ async function importSmartWorkflowFile(file){
     try {
         if(smartWorkflowTransferSub) smartWorkflowTransferSub.textContent = '正在导入工作流...';
         const data = await window.WorkbenchCanvasWorkflowTransfer.importArchive(file);
-        insertSmartWorkflowIntoCanvas(normalizeImportedSmartWorkflow(data));
+        insertSmartWorkflowIntoCanvas(window.WorkbenchCanvasWorkflowTransfer.normalizeImported(data));
         closeSmartWorkflowTransferModal();
     } catch(err) {
         if(smartWorkflowTransferModal?.classList.contains('open')) updateSmartWorkflowTransferMeta();
@@ -1261,13 +1105,10 @@ function persistActiveSmartSettings(){
     rememberRecentSmartSettings(settings, subject);
 }
 function rememberCanvasListProject(projectId){
-    const pid = projectId || 'default';
-    try { localStorage.setItem(CANVAS_LIST_PROJECT_KEY, pid); } catch(e){}
-    return pid;
+    return window.WorkbenchCanvasEntryCompatibility.rememberCanvasListProject(projectId, {storage:localStorage, storageKey:CANVAS_LIST_PROJECT_KEY});
 }
 function canvasListUrlForProject(projectId){
-    const pid = rememberCanvasListProject(projectId);
-    return `/static/canvas-list.html?project=${encodeURIComponent(pid)}`;
+    return window.WorkbenchCanvasEntryCompatibility.canvasListUrl(projectId, {storage:localStorage, storageKey:CANVAS_LIST_PROJECT_KEY});
 }
 function backToCanvasList(){
     savePromptDraftForCurrent();
@@ -1522,8 +1363,9 @@ function selectedNodeIds(){
     return selectedIds.length ? selectedIds.slice() : (selectedId ? [selectedId] : []);
 }
 function isEditableTarget(target){
-    const el = target || document.activeElement;
-    return !!el?.closest?.('input, textarea, select, option, [contenteditable="true"], .prompt-node-control, .prompt-input');
+    return WorkbenchCanvasInteractionTargets.isEditableTarget(target, {
+        selector:'select, option, [contenteditable="true"], .prompt-node-control, .prompt-input',
+    });
 }
 function safeScale(value){
     const n = Number(value);
@@ -2271,17 +2113,10 @@ function arrangeSmartGroupMembers(group, options={}){
     return true;
 }
 function mediaLayoutSize(img){
-    const width = Number(img?.natural_w || img?.width || img?.w || img?.layout_w || img?.preview_w || 0);
-    const height = Number(img?.natural_h || img?.height || img?.h || img?.layout_h || img?.preview_h || 0);
-    return width > 0 && height > 0 ? {width, height} : {width:0, height:0};
+    return WorkbenchCanvasMediaLayout.intrinsicSize(img);
 }
 function copyMediaSizeFields(source, target={}){
-    if(!source || typeof source !== 'object') return target;
-    ['natural_w','natural_h','width','height','w','h','layout_w','layout_h'].forEach(key => {
-        const n = Number(source[key]);
-        if(Number.isFinite(n) && n > 0) target[key] = n;
-    });
-    return target;
+    return window.WorkbenchCanvasMediaPreviewControls.copyPositiveDimensions(source, target);
 }
 function singleImageLayout(image, node, scale){
     const explicitW = Number(node?.w);
@@ -2299,12 +2134,12 @@ function singleImageLayout(image, node, scale){
     if(naturalW > 0 && naturalH > 0){
         const maxW = 260 * scale;
         const maxH = 220 * scale;
-        const fit = Math.min(maxW / naturalW, maxH / naturalH);
+        const fitted = WorkbenchCanvasMediaLayout.contain(layoutSize, maxW, maxH, {minWidth:72, minHeight:72});
         return {
             cols:1,
             rows:1,
-            width:Math.max(72, Math.round(naturalW * fit)),
-            height:Math.max(72, Math.round(naturalH * fit)),
+            width:fitted.width,
+            height:fitted.height,
             thumb:Math.round(96 * scale),
             single:true
         };
@@ -2312,43 +2147,9 @@ function singleImageLayout(image, node, scale){
     return {cols:1, rows:1, width:Math.round(260*scale), height:Math.round(180*scale), thumb:Math.round(96*scale), single:true};
 }
 function groupImageGridLayout(count, explicitW, explicitH, maxThumb, pad=32, gap=8, maxVisibleRows=MEDIA_GROUP_MAX_VISIBLE_ROWS){
-    let best = null;
-    for(let cols = 1; cols <= count; cols++){
-        const rows = Math.ceil(count / cols);
-        const visibleRows = Math.min(Math.max(1, maxVisibleRows), rows);
-        const availableW = explicitW - pad - (cols - 1) * gap;
-        const availableH = explicitH - pad - (visibleRows - 1) * gap;
-        if(availableW <= 0 || availableH <= 0) continue;
-        const rawThumb = Math.floor(Math.min(availableW / cols, availableH / visibleRows));
-        const fittedThumb = Math.max(28, Math.min(maxThumb, rawThumb));
-        const fits = rawThumb >= 28;
-        const usedW = cols * fittedThumb + (cols - 1) * gap + pad;
-        const usedH = visibleRows * fittedThumb + (visibleRows - 1) * gap + pad;
-        const spareW = Math.max(0, explicitW - usedW);
-        const spareH = Math.max(0, explicitH - usedH);
-        const atMax = fittedThumb >= maxThumb;
-        const score = [
-            fits ? 1 : 0,
-            fittedThumb,
-            atMax ? cols : 0,
-            -(spareW + spareH * 0.35),
-            -rows
-        ];
-        let better = !best;
-        if(best){
-            for(let i = 0; i < score.length; i++){
-                if(score[i] === best.score[i]) continue;
-                better = score[i] > best.score[i];
-                break;
-            }
-        }
-        if(better){
-            best = {cols, rows, visibleRows, thumb:fittedThumb, score};
-        }
-    }
-    const fallbackCols = Math.min(count, 2);
-    const fallbackRows = Math.ceil(count / fallbackCols);
-    return best || {cols:fallbackCols, rows:fallbackRows, visibleRows:Math.min(MEDIA_GROUP_MAX_VISIBLE_ROWS, fallbackRows), thumb:28};
+    return WorkbenchCanvasMediaGridLayout.fitSquareGrid(count, explicitW, explicitH, maxThumb, {
+        pad, gap, maxVisibleRows, fallbackMaxVisibleRows:MEDIA_GROUP_MAX_VISIBLE_ROWS
+    });
 }
 function smartNodeInputThumbRows(count){
     return count ? Math.ceil(Math.min(10, count) / 5) : 0;
@@ -3609,23 +3410,14 @@ function parseRatioValue(value){
     return w > 0 && h > 0 ? w / h : 0;
 }
 function apiImageSize(ratioValue, resolutionValue, customRatioValue='', customSizeValue=''){
-    if(resolutionValue === 'auto') return 'auto';
-    if(resolutionValue === 'custom') return String(customSizeValue || '').trim();
-    const resolutionKey = resolutionValue || '1k';
-    if(ratioValue === 'custom' || ratioValue === 'source'){
-        const parsed = parseRatioValue(customRatioValue);
-        const longSide = RES_LONG_SIDE[resolutionKey] || 1024;
-        if(parsed){
-            const pixelLimit = RES_PIXEL_LIMIT[resolutionKey] || (longSide * longSide);
-            const rawWidth = parsed >= 1 ? longSide : Math.min(longSide * parsed, Math.sqrt(pixelLimit * parsed));
-            const rawHeight = parsed >= 1 ? Math.min(longSide / parsed, Math.sqrt(pixelLimit / parsed)) : longSide;
-            const width = Math.floor(rawWidth / 16) * 16;
-            const height = Math.floor(rawHeight / 16) * 16;
-            return `${Math.max(64, width)}x${Math.max(64, height)}`;
-        }
-    }
-    const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
-    return SIZE_MAP[ratioKey]?.[resolutionKey] || SIZE_MAP.square[resolutionKey] || SIZE_MAP.square['1k'];
+    return WorkbenchCanvasImageSize.apiImageSize(ratioValue, resolutionValue, {
+        customRatio:customRatioValue,
+        customSize:customSizeValue,
+        parseRatio:parseRatioValue,
+        longSideByResolution:RES_LONG_SIDE,
+        pixelLimitByResolution:RES_PIXEL_LIMIT,
+        sizeMap:SIZE_MAP,
+    });
 }
 function normalizeApiSizeSettings(prefix=''){
     const ratioKey = prefix ? `${prefix}Ratio` : 'ratio';
@@ -6405,16 +6197,7 @@ function assetCategoryForMention(){
         || cats[0];
 }
 function assetMediaKind(item){
-    if(!item) return 'image';
-    if(item.kind === 'workflow' || item.type === 'workflow') return 'workflow';
-    if(item.kind === 'video' || item.type === 'video') return 'video';
-    if(item.kind === 'audio' || item.type === 'audio') return 'audio';
-    const url = String(item.url || item.thumbnail || '').toLowerCase().split('?')[0];
-    const name = String(item.name || '').toLowerCase();
-    if(/\.(mp4|webm|mov|m4v|avi|mkv)$/.test(url) || /\.(mp4|webm|mov|m4v|avi|mkv)$/.test(name)) return 'video';
-    if(/\.(mp3|wav|m4a|aac|ogg|flac)$/.test(url) || /\.(mp3|wav|m4a|aac|ogg|flac)$/.test(name)) return 'audio';
-    if(/\.(json|zip)$/.test(url) || /\.(json|zip)$/.test(name)) return 'workflow';
-    return 'image';
+    return window.WorkbenchCanvasMediaKind.kindForItem(item, {allowWorkflow:true});
 }
 function assetNodeImageFromItem(item, fallbackName='asset'){
     const url = item?.url || item?.local_url || item?.source_url || item?.sourceUrl || item?.preview || item?.thumbnail || item?.thumb || '';
@@ -7077,67 +6860,65 @@ function createSmartGroupNode(x, y, options={}){
     scheduleSave();
     return node;
 }
-function cloneSmartNode(node, dx=0, dy=0){
+function smartCloneIdPrefix(type){
+    return type === 'smart-prompt'
+        ? 'prompt'
+        : type === 'smart-loop'
+        ? 'loop'
+        : type === 'smart-group'
+        ? 'group'
+        : type === 'smart-minimax'
+        ? 'minimax'
+        : 'smart';
+}
+function smartCloneData(node){
     const copy = JSON.parse(JSON.stringify(node));
-    copy.id = uid(
-        node.type === 'smart-prompt'
-            ? 'prompt'
-            : node.type === 'smart-loop'
-            ? 'loop'
-            : node.type === 'smart-group'
-            ? 'group'
-            : node.type === 'smart-minimax'
-            ? 'minimax'
-            : 'smart'
-    );
-    copy.x = (Number(node.x) || 0) + dx;
-    copy.y = (Number(node.y) || 0) + dy;
     clearSmartNodeTransientRunState(copy, {clearRunHistory:true});
     if(copy.type === 'smart-group') copy.title = copy.title || '智能分组';
     return copy;
 }
+function cloneSmartNode(node, dx=0, dy=0){
+    const copy = smartCloneData(node);
+    copy.id = uid(smartCloneIdPrefix(node.type));
+    copy.x = (Number(node.x) || 0) + dx;
+    copy.y = (Number(node.y) || 0) + dy;
+    return copy;
+}
 function copySelectedNodes(){
     if(!canvas || isEditableTarget(document.activeElement)) return;
-    const ids = selectedNodeIds();
-    const copiedNodes = ids.map(id => nodes.find(n => n.id === id)).filter(Boolean);
-    if(!copiedNodes.length) return;
-    const idSet = new Set(copiedNodes.map(n => n.id));
-    const copiedConnections = (canvas.connections || []).filter(c => idSet.has(c.from) && idSet.has(c.to));
-    nodeClipboard = {
-        nodes:JSON.parse(JSON.stringify(copiedNodes)),
-        connections:JSON.parse(JSON.stringify(copiedConnections))
-    };
-    toast(`已复制 ${copiedNodes.length} 个节点`);
+    const subgraph = window.WorkbenchCanvasGraphFragment.selectedSubgraph({
+        nodes,
+        connections:canvas.connections || [],
+        selectedIds:selectedNodeIds(),
+        serializeNode:node => node,
+        order:'selection',
+    });
+    if(!subgraph.nodes.length) return;
+    nodeClipboard = JSON.parse(JSON.stringify(subgraph));
+    toast(`已复制 ${subgraph.nodes.length} 个节点`);
 }
 function pasteNodes(){
     if(!canvas || !nodeClipboard?.nodes?.length || isEditableTarget(document.activeElement)) return;
     lastNodePasteAt = Date.now();
     pushUndo();
     const sourceNodes = nodeClipboard.nodes;
-    const xs = sourceNodes.map(n => Number(n.x) || 0);
-    const ys = sourceNodes.map(n => Number(n.y) || 0);
-    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
     const p = lastMouseWorld || viewportCenter();
-    const dx = p.x - cx;
-    const dy = p.y - cy;
-    const idMap = new Map();
-    const copies = sourceNodes.map(n => {
-        const copy = cloneSmartNode(n, dx, dy);
-        idMap.set(n.id, copy.id);
-        return copy;
+    const materialized = window.WorkbenchCanvasGraphFragment.materializeImportedSubgraph({
+        nodes:sourceNodes,
+        connections:nodeClipboard.connections || [],
+        target:p,
+        anchor:'center',
+        serializeNode:smartCloneData,
+        createNodeId:type => uid(smartCloneIdPrefix(type)),
+        createConnection:(connection, endpoints) => ({...connection, ...endpoints}),
     });
+    const {nodes:copies, connections:newConnections, idMap} = materialized;
     copies.forEach(copy => {
         if(Array.isArray(copy.inputNodeIds)){
             copy.inputNodeIds = copy.inputNodeIds.map(id => idMap.get(id)).filter(Boolean);
         }
         if(copy.sourceNodeId) copy.sourceNodeId = idMap.get(copy.sourceNodeId) || '';
     });
-    const newConnections = (nodeClipboard.connections || []).map(conn => ({
-        ...conn,
-        from:idMap.get(conn.from),
-        to:idMap.get(conn.to)
-    })).filter(conn => conn.from && conn.to && conn.from !== conn.to);
     canvas.connections = [...(canvas.connections || []), ...newConnections];
     nodes.push(...copies);
     selectedId = copies.length === 1 ? copies[0].id : '';
@@ -7428,37 +7209,22 @@ function syncSmartGroupMemberElements(group){
     });
 }
 function isVideoMediaItem(img){
-    if(!img) return false;
-    if(img.kind === 'video') return true;
-    const url = smartOriginalMediaUrl(img).toLowerCase();
-    return /\.(mp4|webm|mov|m4v|avi|mkv)(\?|$)/.test(url);
+    return window.WorkbenchCanvasMediaKind.kindForItem(img, {originalUrl:smartOriginalMediaUrl}) === 'video';
 }
 function isInlineVideoActive(img){
     return Boolean(img && img._inlineVideoActive);
 }
 function isAudioMediaItem(img){
-    if(!img) return false;
-    if(img.kind === 'audio') return true;
-    const url = smartOriginalMediaUrl(img).toLowerCase();
-    return /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/.test(url);
+    return window.WorkbenchCanvasMediaKind.kindForItem(img, {originalUrl:smartOriginalMediaUrl}) === 'audio';
 }
 function isTextMediaItem(img){
-    if(!img) return false;
-    if(img.kind === 'text') return true;
-    const url = smartOriginalMediaUrl(img).toLowerCase();
-    return /\.(txt|json|csv|srt|vtt|md)(\?|$)/.test(url);
+    return window.WorkbenchCanvasMediaKind.kindForItem(img, {originalUrl:smartOriginalMediaUrl}) === 'text';
 }
 function isFileMediaItem(img){
-    if(!img) return false;
-    return img.kind === 'file';
+    return window.WorkbenchCanvasMediaKind.kindForItem(img, {originalUrl:smartOriginalMediaUrl}) === 'file';
 }
 function mediaKindForFile(file){
-    const type = String(file?.type || '').toLowerCase();
-    const name = String(file?.name || '').toLowerCase();
-    if(type.startsWith('video/') || /\.(mp4|webm|mov|m4v|avi|mkv)(\?|$)/.test(name)) return 'video';
-    if(type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/.test(name)) return 'audio';
-    if(type.startsWith('text/') || /\.(txt|json|csv|srt|vtt|md)(\?|$)/.test(name)) return 'text';
-    return 'image';
+    return window.WorkbenchCanvasMediaKind.kindForFile(file);
 }
 function mediaKindForItem(img){
     if(isFileMediaItem(img)) return 'file';
@@ -7491,43 +7257,11 @@ function imageForDisplay(img){
     };
 }
 function resultMediaUrls(result){
-    const urls = [];
-    const add = value => {
-        if(!value) return;
-        if(typeof value === 'string'){
-            urls.push(value);
-            return;
-        }
-        if(Array.isArray(value)){
-            value.forEach(add);
-            return;
-        }
-        if(typeof value === 'object'){
-            if(value.url || value.path || value.src || value.uri){
-                const url = value.url || value.path || value.src || value.uri;
-                if(url){
-                    const item = {url, kind:value.kind || value.type || value.mediaKind || '', name:value.name || value.filename || ''};
-                    ['natural_w','natural_h','width','height','w','h','layout_w','layout_h'].forEach(key => {
-                        const n = Number(value[key]);
-                        if(Number.isFinite(n) && n > 0) item[key] = n;
-                    });
-                    urls.push(item);
-                }
-            }
-            ['image_items','media_items','items','outputs','videos','images','urls','data','result'].forEach(key => add(value[key]));
-            ['url','path','src','uri','output','output_url','outputUrl','video','video_url','videoUrl','mp4_url','mp4Url','download_url','downloadUrl','preview_url','previewUrl'].forEach(key => add(value[key]));
-        }
-    };
-    add(result);
-    ['image_items','media_items','items','outputs','videos','audios','texts','files','images','urls','data','result','output','url'].forEach(key => add(result?.[key]));
-    const seen = new Set();
-    return urls.map(item => {
-        const url = typeof item === 'string' ? item : item?.url || item?.path || '';
-        if(!url) return null;
-        return typeof item === 'object' ? {...item, url} : url;
-    }).filter(item => {
-        const url = typeof item === 'string' ? item : item?.url || '';
-        return url && !seen.has(url) && seen.add(url);
+    return window.WorkbenchCanvasMediaResultNormalizer.extract(result, {
+        includeRoot:true,
+        nestedKeys:['image_items','media_items','items','outputs','videos','images','urls','data','result'],
+        rootKeys:['image_items','media_items','items','outputs','videos','audios','texts','files','images','urls','data','result','output','url'],
+        copyFields:['natural_w','natural_h','width','height','w','h','layout_w','layout_h'],
     });
 }
 function mediaKindForUrls(urls, fallback='image'){
@@ -7539,24 +7273,19 @@ function mediaKindForUrls(urls, fallback='image'){
     return fallback;
 }
 function imageRefsOnly(refs){
-    return (refs || []).filter(ref => ref?.url && mediaKindForItem(ref) === 'image').slice(0, SMART_REFERENCE_IMAGE_MAX);
+    return WorkbenchCanvasMediaReferences.refsOfKind(refs, 'image', {kindOf:mediaKindForItem, limit:SMART_REFERENCE_IMAGE_MAX});
 }
 function looksLikeImageMediaUrl(url){
-    const text = String(url || '').trim().toLowerCase();
-    if(!text) return false;
-    if(text.startsWith('data:image/')) return true;
-    if(text.startsWith('asset://')) return false;
-    const path = text.split('?', 1)[0].split('#', 1)[0];
-    return /\.(png|jpe?g|webp|gif|bmp|tiff)$/i.test(path);
+    return WorkbenchCanvasMediaReferences.looksLikeImageUrl(url);
 }
 function videoRefsOnly(refs){
-    return (refs || []).filter(ref => ref?.url && mediaKindForItem(ref) === 'video' && !looksLikeImageMediaUrl(ref.url));
+    return WorkbenchCanvasMediaReferences.refsOfKind(refs, 'video', {kindOf:mediaKindForItem, accept:ref => !looksLikeImageMediaUrl(ref.url)});
 }
 function isRemoteVideoReferenceUrl(url){
-    return /^https?:\/\//i.test(String(url || '')) || /^asset:\/\//i.test(String(url || ''));
+    return WorkbenchCanvasMediaReferences.isRemoteVideoReferenceUrl(url);
 }
 function audioRefsOnly(refs){
-    return (refs || []).filter(ref => ref?.url && mediaKindForItem(ref) === 'audio');
+    return WorkbenchCanvasMediaReferences.refsOfKind(refs, 'audio', {kindOf:mediaKindForItem});
 }
 function thumbMediaHtml(img){
     if(isFileMediaItem(img) || isTextMediaItem(img)) return `<div class="media-thumb file-thumb" data-media-url="${escapeAttr(img.url || '')}" data-media-kind="${escapeAttr(mediaKindForItem(img))}"><i data-lucide="${isTextMediaItem(img) ? 'file-text' : 'file'}"></i><span>${escapeHtml(img.name || (isTextMediaItem(img) ? 'Text' : 'File'))}</span></div>`;
@@ -7584,16 +7313,7 @@ function imageNameBadgeHtml(img, options={}){
     return `<span class="image-name-badge${outsideClass}" data-image-name="1" title="${escapeAttr(label)}">${escapeHtml(label)}</span>`;
 }
 function thumbDisplaySize(img, maxSize){
-    const limit = Math.max(28, Math.round(Number(maxSize) || 96));
-    const size = mediaLayoutSize(img);
-    const w = size.width;
-    const h = size.height;
-    if(!(w > 0 && h > 0)) return {width:limit, height:limit};
-    const fit = Math.min(limit / w, limit / h);
-    return {
-        width:Math.max(28, Math.round(w * fit)),
-        height:Math.max(28, Math.round(h * fit))
-    };
+    return WorkbenchCanvasMediaLayout.thumbnailSize(img, maxSize);
 }
 function thumbItemStyle(img, maxSize){
     const size = thumbDisplaySize(img, maxSize);
@@ -7652,31 +7372,10 @@ function mediaSignaturePartFromElement(itemEl){
     return '';
 }
 function captureMediaPlaybackState(media){
-    if(!media) return null;
-    return {
-        currentTime:Number.isFinite(media.currentTime) ? media.currentTime : 0,
-        paused:Boolean(media.paused),
-        playbackRate:Number.isFinite(media.playbackRate) ? media.playbackRate : 1,
-        muted:Boolean(media.muted),
-        volume:Number.isFinite(media.volume) ? media.volume : 1
-    };
+    return WorkbenchCanvasMediaPlaybackState.capture(media);
 }
 function restoreMediaPlaybackState(media, state){
-    if(!media || !state) return;
-    try { media.playbackRate = state.playbackRate || 1; } catch(e) {}
-    try { media.muted = state.muted; } catch(e) {}
-    try { media.volume = state.volume; } catch(e) {}
-    const applyTime = () => {
-        if(Number.isFinite(state.currentTime) && state.currentTime > 0 && Math.abs((media.currentTime || 0) - state.currentTime) > 0.2){
-            try { media.currentTime = state.currentTime; } catch(e) {}
-        }
-        if(!state.paused && typeof media.play === 'function'){
-            const playPromise = media.play();
-            if(playPromise?.catch) playPromise.catch(() => {});
-        }
-    };
-    if(media.readyState >= 1) applyTime();
-    else media.addEventListener('loadedmetadata', applyTime, {once:true});
+    WorkbenchCanvasMediaPlaybackState.restore(media, state);
 }
 function transplantSmartMediaElements(oldNodeEl, newNodeEl){
     const oldStage = oldNodeEl?.querySelector?.('[data-minimax-player-stage]');
@@ -7716,21 +7415,10 @@ function transplantSmartMediaElements(oldNodeEl, newNodeEl){
     });
 }
 function captureMediaPlaybackStates(){
-    const states = new Map();
-    world.querySelectorAll('video[data-url], audio[data-url]').forEach(media => {
-        const tag = media.tagName.toLowerCase();
-        const url = media.dataset.url || media.getAttribute('src') || '';
-        if(url) states.set(`${tag}:${url}`, captureMediaPlaybackState(media));
-    });
-    return states;
+    return WorkbenchCanvasMediaPlaybackState.captureAll(world);
 }
 function restoreMediaPlaybackStates(states){
-    if(!states?.size) return;
-    world.querySelectorAll('video[data-url], audio[data-url]').forEach(media => {
-        const tag = media.tagName.toLowerCase();
-        const url = media.dataset.url || media.getAttribute('src') || '';
-        restoreMediaPlaybackState(media, states.get(`${tag}:${url}`));
-    });
+    WorkbenchCanvasMediaPlaybackState.restoreAll(world, states);
 }
 function smartRunTaskLabel(run){
     const s = run?.settings || {};
@@ -10917,8 +10605,13 @@ function deleteNode(id){
     nodes.forEach(node => {
         if(isHistoryGroupNode(node) && node.historyFor === id) deleteIds.add(node.id);
     });
-    nodes = nodes.filter(node => !deleteIds.has(node.id));
-    if(canvas) canvas.connections = (canvas.connections || []).filter(c => !deleteIds.has(c.from) && !deleteIds.has(c.to));
+    const remaining = window.WorkbenchCanvasGraphFragment.removeGraphRecords({
+        nodes,
+        connections:canvas?.connections || [],
+        removeIds:deleteIds,
+    });
+    nodes = remaining.nodes;
+    if(canvas) canvas.connections = remaining.connections;
     nodes.forEach(node => {
         if(Array.isArray(node.inputNodeIds)) node.inputNodeIds = node.inputNodeIds.filter(inputId => !deleteIds.has(inputId));
         if(isSmartGroupNode(node) && Array.isArray(node.items)) node.items = node.items.filter(itemId => !deleteIds.has(itemId));
@@ -14299,17 +13992,7 @@ function smartImageFilesFromDataTransfer(dataTransfer){
     return [...(dataTransfer?.files || [])].filter(isSupportedUploadFile);
 }
 async function smartResponseErrorMessage(response, fallback='请求失败'){
-    try {
-        const data = await response.clone().json();
-        const detail = data.detail ?? data.error ?? data.message;
-        if(typeof detail === 'string') return detail || fallback;
-        if(Array.isArray(detail)) return detail.map(item => item?.msg || item?.message || String(item)).join('\n') || fallback;
-    } catch(_) {}
-    try {
-        const text = await response.text();
-        if(text) return text;
-    } catch(_) {}
-    return fallback;
+    return window.WorkbenchCanvasHttpError.responseMessage(response, fallback);
 }
 function smartDropDataTypes(dataTransfer){
     return [...(dataTransfer?.types || [])].map(type => String(type || ''));

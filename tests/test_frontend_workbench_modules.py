@@ -8,14 +8,503 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FrontendWorkbenchModulesTests(unittest.TestCase):
+    def test_editor_adapters_share_execution_result_media_normalization(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "media-result-normalizer.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm'); const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const api = sandbox.window.WorkbenchCanvasMediaResultNormalizer;
+const classic = api.extract({{images:[{{url:'/one.png', name:'one'}}, '/two.png'], output_url:'/one.png'}});
+const smart = api.extract({{url:'/root.png', width:640, image_items:[{{url:'/nested.mp4', height:360}}]}}, {{includeRoot:true, nestedKeys:['image_items'], rootKeys:['image_items'], copyFields:['width','height']}});
+console.log(JSON.stringify({{classic, smart}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "classic": [{"url": "/one.png", "kind": "", "name": "one"}, "/two.png"],
+            "smart": [{"url": "/root.png", "kind": "", "name": "", "width": 640}, {"url": "/nested.mp4", "kind": "", "name": "", "height": 360}],
+        })
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            page_source = (ROOT / "static" / page).read_text(encoding="utf-8")
+            editor_source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertLess(page_source.index("workbench/canvas/media-result-normalizer.js"), page_source.index(editor))
+            self.assertIn("WorkbenchCanvasMediaResultNormalizer.extract", editor_source)
+    def test_editor_adapters_share_pure_media_kind_classification(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "media-kind.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const api = sandbox.window.WorkbenchCanvasMediaKind;
+console.log(JSON.stringify({{
+  video:api.kindForUrl('/output/one.mp4'), audio:api.kindForUrl('/output/one.flac'), text:api.kindForUrl('/output/one.md'),
+  workflow:api.kindForItem({{name:'workflow.zip'}}, {{allowWorkflow:true}}), file:api.kindForItem({{kind:'file', url:'/output/x.png'}}),
+  classicFlv:api.kindForUrl('/output/one.flv', {{includeFlv:true}}), smartFlv:api.kindForUrl('/output/one.flv'),
+  mime:api.kindForFile({{type:'video/mp4', name:'ignored'}}), fallback:api.kindForFile({{type:'', name:'unknown.bin'}}),
+}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "video": "video", "audio": "audio", "text": "text", "workflow": "workflow", "file": "file",
+            "classicFlv": "video", "smartFlv": "image", "mime": "video", "fallback": "image",
+        })
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            page_source = (ROOT / "static" / page).read_text(encoding="utf-8")
+            editor_source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertLess(page_source.index("workbench/canvas/media-kind.js"), page_source.index(editor))
+            self.assertIn("WorkbenchCanvasMediaKind", editor_source)
+    def test_editor_adapters_share_pure_media_url_normalization(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "media-url.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const sandbox = {{window: {{location: {{origin:'http://127.0.0.1:3000'}}}}, URL, encodeURIComponent}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const api = sandbox.window.WorkbenchCanvasMediaUrl;
+console.log(JSON.stringify({{
+  original:api.originalUrl('/api/media-preview?w=512&url=%2Foutput%2Fone.png', 'http://127.0.0.1:3000'),
+  local:api.previewUrl('/output/one.png', {{size:513, displayUrl:value => `display:${{value}}`}}),
+  remote:api.previewUrl('https://example.test/one.png', {{displayUrl:value => `display:${{value}}`}}),
+  inline:api.previewUrl('data:image/png;base64,AA', {{displayUrl:value => `display:${{value}}`, keepInlineUrl:true}}),
+  unsupported:api.previewUrl('/output/one.txt', {{displayUrl:value => `display:${{value}}`, keepUnsupportedUrl:true}}),
+}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "original": "/output/one.png",
+            "local": "/api/media-preview?w=513&url=%2Foutput%2Fone.png",
+            "remote": "display:https://example.test/one.png",
+            "inline": "data:image/png;base64,AA",
+            "unsupported": "/output/one.txt",
+        })
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            page_source = (ROOT / "static" / page).read_text(encoding="utf-8")
+            editor_source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertLess(page_source.index("workbench/canvas/media-url.js"), page_source.index(editor))
+            self.assertIn("WorkbenchCanvasMediaUrl.originalUrl", editor_source)
+            self.assertIn("WorkbenchCanvasMediaUrl.previewUrl", editor_source)
+
+    def test_editor_adapters_share_native_video_event_isolation(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "media-preview-controls.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const listeners = {{}};
+const overlay = {{style:{{display:'initial'}}}};
+const video = {{
+  dataset:{{}}, paused:false, ended:false,
+  parentElement:{{querySelector: selector => selector === '.video-overlay' ? overlay : null}},
+  addEventListener:(type, listener) => {{ (listeners[type] ||= []).push(listener); }},
+}};
+const bound = sandbox.window.WorkbenchCanvasMediaPreviewControls.bindVideoOverlay(video, {{boundKey:'adapterBound', overlaySelector:'.video-overlay'}});
+video.paused = true;
+listeners.pause[0]();
+const pausedDisplay = overlay.style.display;
+video.paused = false;
+listeners.play[0]();
+const playingDisplay = overlay.style.display;
+let stopped = 0;
+listeners.click[0]({{stopPropagation:() => {{ stopped += 1; }}}});
+const second = sandbox.window.WorkbenchCanvasMediaPreviewControls.bindVideoOverlay(video, {{boundKey:'adapterBound', overlaySelector:'.video-overlay'}});
+console.log(JSON.stringify({{bound, second, marker:video.dataset.adapterBound, pausedDisplay, playingDisplay, stopped, eventCount:Object.keys(listeners).length}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "bound": True,
+            "second": False,
+            "marker": "1",
+            "pausedDisplay": "",
+            "playingDisplay": "none",
+            "stopped": 1,
+            "eventCount": 12,
+        })
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            page_source = (ROOT / "static" / page).read_text(encoding="utf-8")
+            editor_source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertLess(page_source.index("workbench/canvas/media-preview-controls.js"), page_source.index(editor))
+            self.assertIn("WorkbenchCanvasMediaPreviewControls.bindVideoOverlay", editor_source)
+
+    def test_media_preview_controls_bind_image_fallbacks_without_adapter_dom_logic(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "media-preview-controls.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const listeners = {{}};
+const fallback = {{id:'fallback'}};
+const template = {{content:{{firstElementChild:fallback}}, set innerHTML(value) {{ this.html = value; }}}};
+const video = {{dataset:{{inlineVideoActive:'1'}}}};
+const image = {{
+  dataset:{{previewSrc:'/api/media-preview', originalSrc:'/assets/video.mp4', previewKind:'video', videoFallbackAttrs:'muted'}},
+  ownerDocument:{{createElement:type => type === 'template' ? template : null}},
+  addEventListener:(type, listener) => {{ listeners[type] = listener; }},
+  getAttribute:() => '/api/media-preview', replaceWith:value => {{ image.replaced = value; }},
+}};
+const imageOnly = {{
+  dataset:{{previewSrc:'/api/media-preview', originalSrc:'/assets/image.png'}},
+  addEventListener:(type, listener) => {{ imageOnly.listener = listener; }},
+  getAttribute:() => '/api/media-preview', src:'',
+}};
+const root = {{querySelectorAll:selector => selector.startsWith('img') ? [image, imageOnly] : [video]}};
+const bound = [];
+sandbox.window.WorkbenchCanvasMediaPreviewControls.bindPreviewImageFallbacks(root, {{
+  videoFallbackHtml:(url, attrs) => `<video data-url="${{url}}" ${{attrs}}></video>`,
+  bindVideoOverlay:item => bound.push(item.id || 'inline'),
+}});
+listeners.error();
+imageOnly.listener();
+console.log(JSON.stringify({{markers:[image.dataset.previewFallbackBound, imageOnly.dataset.previewFallbackBound], html:template.html, replaced:image.replaced.id, imageSrc:imageOnly.src, bound}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "markers": ["1", "1"],
+            "html": '<video data-url="/assets/video.mp4" muted></video>',
+            "replaced": "fallback",
+            "imageSrc": "/assets/image.png",
+            "bound": ["inline", "fallback"],
+        })
+        for editor in ("canvas.js", "smart-canvas.js"):
+            source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertIn("WorkbenchCanvasMediaPreviewControls.bindPreviewImageFallbacks", source)
+
+    def test_media_preview_controls_preload_image_decodes_and_reports_failure(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "media-preview-controls.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const createImage = kind => () => {{
+  const image = {{decoding:'', decode:async () => {{ image.decoded = true; }}}};
+  Object.defineProperty(image, 'src', {{set: value => {{ image.value = value; queueMicrotask(() => kind === 'ok' ? image.onload() : image.onerror()); }}}});
+  return image;
+}};
+(async () => {{
+  const api = sandbox.window.WorkbenchCanvasMediaPreviewControls;
+  const ok = await api.preloadImage('/assets/image.png', {{createImage:createImage('ok')}});
+  const failed = await api.preloadImage('/assets/missing.png', {{createImage:createImage('fail')}});
+  const empty = await api.preloadImage('', {{createImage:createImage('ok')}});
+  console.log(JSON.stringify({{ok, failed, empty}}));
+}})();
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {"ok": True, "failed": False, "empty": False})
+        for editor in ("canvas.js", "smart-canvas.js"):
+            source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertIn("WorkbenchCanvasMediaPreviewControls.preloadImage", source)
+
+    def test_media_preview_controls_collect_high_res_candidates_preserves_preview_states(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "media-preview-controls.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const makeImage = (original, preview, src, kind='') => ({{
+  dataset:{{originalSrc:original, previewSrc:preview, previewKind:kind, selectedHighResTarget:'old'}},
+  getAttribute:() => src, src:'',
+}});
+const pending = makeImage('/assets/pending.png', '/preview/pending.png', '/preview/pending.png');
+const loaded = makeImage('/assets/loaded.png', '/preview/loaded.png', '/preview/loaded.png');
+const far = makeImage('/assets/far.png', '/preview/far.png', '/assets/far.png');
+const video = makeImage('/assets/video.png', '/preview/video.png', '/preview/video.png', 'video');
+const root = {{querySelectorAll:() => [pending, loaded, far, video]}};
+const candidates = sandbox.window.WorkbenchCanvasMediaPreviewControls.collectHighResCandidates({{
+  root, wantHighRes:true, isNearViewport:image => image !== far,
+  resolveTarget:original => `high:${{original}}`, isLoaded:target => target.includes('loaded'),
+}});
+console.log(JSON.stringify({{candidates:candidates.map(item => item.target), pending:pending.dataset.selectedHighResTarget, loadedSrc:loaded.src, farSrc:far.src, farTarget:far.dataset.selectedHighResTarget || '', videoTarget:video.dataset.selectedHighResTarget}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "candidates": ["high:/assets/pending.png"],
+            "pending": "high:/assets/pending.png",
+            "loadedSrc": "high:/assets/loaded.png",
+            "farSrc": "/preview/far.png",
+            "farTarget": "",
+            "videoTarget": "old",
+        })
+        for editor in ("canvas.js", "smart-canvas.js"):
+            source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertIn("WorkbenchCanvasMediaPreviewControls.collectHighResCandidates", source)
+
+    def test_smart_adapter_delegates_pure_media_grid_fitting_to_shared_canvas_module(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "media-grid-layout.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm'); const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const api = sandbox.window.WorkbenchCanvasMediaGridLayout;
+console.log(JSON.stringify({{
+  fitted:api.fitSquareGrid(4, 400, 300, 100, {{pad:32, gap:8, maxVisibleRows:4}}),
+  fallback:api.fitSquareGrid(3, 1, 1, 100, {{pad:32, gap:8, maxVisibleRows:2, fallbackMaxVisibleRows:4}}),
+}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "fitted": {"cols": 3, "rows": 2, "visibleRows": 2, "thumb": 100, "score": [1, 100, 3, -73, -2]},
+            "fallback": {"cols": 2, "rows": 2, "visibleRows": 2, "thumb": 28},
+        })
+        smart_page = (ROOT / "static" / "smart-canvas.html").read_text(encoding="utf-8")
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        classic_page = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
+        self.assertLess(smart_page.index("workbench/canvas/media-grid-layout.js"), smart_page.index("smart-canvas.js"))
+        self.assertLess(classic_page.index("workbench/canvas/media-grid-layout.js"), classic_page.index("canvas.js"))
+        layout = smart[smart.index("function groupImageGridLayout(") : smart.index("function smartNodeInputThumbRows(")]
+        self.assertIn("WorkbenchCanvasMediaGridLayout.fitSquareGrid", layout)
+        self.assertNotIn("for(let cols", layout)
+
+    def test_smart_adapter_delegates_pure_media_intrinsic_and_thumbnail_sizing(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "media-layout.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm'); const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const api = sandbox.window.WorkbenchCanvasMediaLayout;
+console.log(JSON.stringify({{
+  intrinsic:api.intrinsicSize({{natural_w:1200, natural_h:800, width:1, height:1}}),
+  fallback:api.intrinsicSize({{width:0, height:40}}),
+  contain:api.contain({{width:1200, height:800}}, 260, 220, {{minWidth:72, minHeight:72}}),
+  thumbnail:api.thumbnailSize({{layout_w:200, layout_h:100}}, 96),
+  unknown:api.thumbnailSize({{}}, 64),
+}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "intrinsic": {"width": 1200, "height": 800}, "fallback": {"width": 0, "height": 0},
+            "contain": {"width": 260, "height": 173}, "thumbnail": {"width": 96, "height": 48},
+            "unknown": {"width": 64, "height": 64},
+        })
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        smart_page = (ROOT / "static" / "smart-canvas.html").read_text(encoding="utf-8")
+        classic_page = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
+        self.assertLess(smart_page.index("workbench/canvas/media-layout.js"), smart_page.index("smart-canvas.js"))
+        self.assertLess(classic_page.index("workbench/canvas/media-layout.js"), classic_page.index("canvas.js"))
+        self.assertIn("WorkbenchCanvasMediaLayout.intrinsicSize", smart)
+        self.assertIn("WorkbenchCanvasMediaLayout.contain", smart)
+        self.assertIn("WorkbenchCanvasMediaLayout.thumbnailSize", smart)
+
+    def test_editor_adapters_share_native_media_playback_state_preservation(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "media-playback-state.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm'); const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const api = sandbox.window.WorkbenchCanvasMediaPlaybackState;
+const makeMedia = (url, state={{}}) => {{
+  const listeners = {{}};
+  return {{tagName:'VIDEO', dataset:{{url}}, currentTime:state.currentTime ?? 0, paused:state.paused ?? true,
+    playbackRate:state.playbackRate ?? 1, muted:state.muted ?? false, volume:state.volume ?? 1, readyState:state.readyState ?? 1,
+    getAttribute:key => key === 'src' ? url : '', addEventListener:(type, callback, options) => {{ listeners[type] = {{callback, options}}; }},
+    play:() => {{ this.played = (this.played || 0) + 1; return {{catch:() => {{}}}}; }}, listeners}};
+}};
+const oldMedia = makeMedia('/output/one.mp4', {{currentTime:18.4, paused:false, playbackRate:1.25, muted:true, volume:0.4}});
+const newMedia = makeMedia('/output/one.mp4', {{currentTime:0, readyState:1}});
+const root = {{querySelectorAll:() => [oldMedia]}};
+const states = api.captureAll(root);
+api.restore(newMedia, states.get(api.signature(newMedia)));
+const delayed = makeMedia('/output/two.mp4', {{readyState:0}});
+api.restore(delayed, {{currentTime:7, paused:true, playbackRate:2, muted:false, volume:0.8}});
+delayed.listeners.loadedmetadata.callback();
+console.log(JSON.stringify({{signature:api.signature(oldMedia), size:states.size, restored:{{time:newMedia.currentTime, rate:newMedia.playbackRate, muted:newMedia.muted, volume:newMedia.volume}}, delayed:{{time:delayed.currentTime, rate:delayed.playbackRate, volume:delayed.volume, once:delayed.listeners.loadedmetadata.options.once}}}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "signature": "video:/output/one.mp4", "size": 1,
+            "restored": {"time": 18.4, "rate": 1.25, "muted": True, "volume": 0.4},
+            "delayed": {"time": 7, "rate": 2, "volume": 0.8, "once": True},
+        })
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            page_source = (ROOT / "static" / page).read_text(encoding="utf-8")
+            editor_source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertLess(page_source.index("workbench/canvas/media-playback-state.js"), page_source.index(editor))
+            self.assertIn("WorkbenchCanvasMediaPlaybackState.captureAll", editor_source)
+            self.assertIn("WorkbenchCanvasMediaPlaybackState.restoreAll", editor_source)
+
+    def test_editor_adapters_share_media_reference_filtering(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "media-references.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm'); const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const api = sandbox.window.WorkbenchCanvasMediaReferences;
+const refs = [{{url:'/one.png', kind:'image'}}, {{url:'/two.mp4', kind:'video'}}, {{url:'https://example.test/three.mp4', kind:'video'}}, {{url:'data:image/png;base64,AA', kind:'video'}}, {{url:'/four.mp3', kind:'audio'}}, {{kind:'image'}}];
+console.log(JSON.stringify({{
+  images:api.refsOfKind(refs, 'image', {{kindOf:ref => ref.kind, limit:1}}).map(ref => ref.url),
+  videos:api.refsOfKind(refs, 'video', {{kindOf:ref => ref.kind, accept:ref => !api.looksLikeImageUrl(ref.url)}}).map(ref => ref.url),
+  audios:api.refsOfKind(refs, 'audio', {{kindOf:ref => ref.kind}}).map(ref => ref.url),
+  remote:[api.isRemoteVideoReferenceUrl('https://example.test/x'), api.isRemoteVideoReferenceUrl('asset://x'), api.isRemoteVideoReferenceUrl('/assets/x')],
+  imageUrls:[api.looksLikeImageUrl('data:image/png;base64,AA'), api.looksLikeImageUrl('asset://image.png'), api.looksLikeImageUrl('/output/a.tiff?x=1')],
+}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "images": ["/one.png"], "videos": ["/two.mp4", "https://example.test/three.mp4"], "audios": ["/four.mp3"],
+            "remote": [True, True, False], "imageUrls": [True, False, True],
+        })
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            page_source = (ROOT / "static" / page).read_text(encoding="utf-8")
+            editor_source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertLess(page_source.index("workbench/canvas/media-references.js"), page_source.index(editor))
+            self.assertIn("WorkbenchCanvasMediaReferences.refsOfKind", editor_source)
+            self.assertIn("WorkbenchCanvasMediaReferences.isRemoteVideoReferenceUrl", editor_source)
+
+    def test_editor_adapters_share_canvas_list_entry_and_project_memory(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-entry-compatibility.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm'); const store = new Map();
+const sandbox = {{window: {{}}, URLSearchParams, encodeURIComponent}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const api = sandbox.window.WorkbenchCanvasEntryCompatibility;
+const storage = {{setItem:(key, value) => store.set(key, value), getItem:key => store.get(key) || null}};
+const saved = api.rememberCanvasListProject('project / one', {{storage, storageKey:'last-project'}});
+console.log(JSON.stringify({{saved, restored:api.rememberedCanvasListProject({{storage, storageKey:'last-project'}}), fallback:api.rememberedCanvasListProject({{storage:{{getItem:() => null}}, storageKey:'missing'}}), url:api.canvasListUrl('project / two', {{storage, storageKey:'last-project'}}), stored:store.get('last-project')}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "saved": "project / one", "restored": "project / one", "fallback": "default",
+            "url": "/static/canvas-list.html?project=project%20%2F%20two", "stored": "project / two",
+        })
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            page_source = (ROOT / "static" / page).read_text(encoding="utf-8")
+            editor_source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertLess(page_source.index("workbench/canvas/canvas-entry-compatibility.js"), page_source.index(editor))
+            self.assertIn("WorkbenchCanvasEntryCompatibility.canvasListUrl", editor_source)
+            self.assertIn("WorkbenchCanvasEntryCompatibility.rememberCanvasListProject", editor_source)
+
+    def test_editor_adapters_share_clipboard_fallbacks(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-clipboard.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+(async () => console.log(JSON.stringify({{
+  empty:await sandbox.window.WorkbenchCanvasClipboard.copyText(''),
+  api:Object.keys(sandbox.window.WorkbenchCanvasClipboard).sort(),
+}})))();
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "empty": False,
+            "api": ["copyText", "copyWithCopyEvent", "copyWithTextarea", "matchesText"],
+        })
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            page_source = (ROOT / "static" / page).read_text(encoding="utf-8")
+            editor_source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertLess(page_source.index("workbench/canvas/canvas-clipboard.js"), page_source.index(editor))
+            self.assertIn("WorkbenchCanvasClipboard.copyText", editor_source)
+            self.assertIn("WorkbenchCanvasClipboard.copyWithCopyEvent", editor_source)
+            self.assertNotIn("document.addEventListener('copy', onCopy)", editor_source)
+
+    def test_editor_adapters_share_image_size_calculation(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "image-size.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const api = sandbox.window.WorkbenchCanvasImageSize.apiImageSize;
+const options = {{
+  parseRatio:value => {{ const [w, h] = String(value).split(':').map(Number); return w > 0 && h > 0 ? w / h : 0; }},
+  longSideByResolution:{{'1k':1536, '4k':3840}},
+  pixelLimitByResolution:{{'1k':1572864, '4k':8294400}},
+  sizeMap:{{square:{{'1k':'1024x1024'}}, wide:{{'1k':'1536x864'}}}},
+}};
+console.log(JSON.stringify([
+  api('wide', '1k', options),
+  api('custom', '1k', {{...options, customRatio:'4:3'}}),
+  api('custom', '4k', {{...options, customRatio:'3:4'}}),
+  api('custom', 'custom', {{...options, customSize:' 111x222 '}}),
+  api('square', 'auto', options),
+  api('missing', '1k', options),
+]));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), ["1536x864", "1536x1072", "2480x3840", "111x222", "auto", "1024x1024"])
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            page_source = (ROOT / "static" / page).read_text(encoding="utf-8")
+            editor_source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertLess(page_source.index("workbench/canvas/image-size.js"), page_source.index(editor))
+            self.assertIn("WorkbenchCanvasImageSize.apiImageSize", editor_source)
+            self.assertNotIn("const rawWidth = parsed >= 1", editor_source)
+
+    def test_editor_adapters_share_editable_target_detection(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "interaction-targets.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const isEditable = sandbox.window.WorkbenchCanvasInteractionTargets.isEditableTarget;
+const target = (tagName, extra={{}}) => ({{tagName, isContentEditable:false, closest:selector => extra.matches?.includes(selector) ? {{}} : null, ...extra}});
+console.log(JSON.stringify([
+  isEditable(target('INPUT')),
+  isEditable(target('DIV', {{isContentEditable:true}})),
+  isEditable(target('DIV', {{matches:['select, option']}})),
+  isEditable(target('DIV', {{matches:['select, option, [contenteditable="true"], .prompt-node-control, .prompt-input']}}), {{selector:'select, option, [contenteditable="true"], .prompt-node-control, .prompt-input'}}),
+  isEditable(target('DIV')),
+]));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), [True, True, True, True, False])
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            page_source = (ROOT / "static" / page).read_text(encoding="utf-8")
+            editor_source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertLess(page_source.index("workbench/canvas/interaction-targets.js"), page_source.index(editor))
+            self.assertIn("WorkbenchCanvasInteractionTargets.isEditableTarget", editor_source)
+
+    def test_editor_adapters_share_http_error_formatting(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-http-error.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+(async () => {{
+  const format = sandbox.window.WorkbenchCanvasHttpError.message;
+  const response = sandbox.window.WorkbenchCanvasHttpError.responseMessage;
+  const parsed = await response({{clone: () => ({{json: async () => ({{detail:[{{loc:['body', 'title'], msg:'required'}}]}})}}), text: async () => 'unused'}}, 'fallback');
+  const text = await response({{clone: () => ({{json: async () => Promise.reject(new Error('not json'))}}), text: async () => 'plain failure'}}, 'fallback');
+  console.log(JSON.stringify({{
+    formatted:[format('string', 'fallback'), format({{detail:{{message:'nested'}}}}, 'fallback'), format({{}}, 'fallback')],
+    parsed, text,
+  }}));
+}})();
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload, {
+            "formatted": ["string", "nested", "{}"],
+            "parsed": "title: required",
+            "text": "plain failure",
+        })
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            page_source = (ROOT / "static" / page).read_text(encoding="utf-8")
+            editor_source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
+            self.assertLess(page_source.index("workbench/canvas/canvas-http-error.js"), page_source.index(editor))
+            self.assertIn("WorkbenchCanvasHttpError.message", editor_source)
+            self.assertIn("WorkbenchCanvasHttpError.responseMessage", editor_source)
+            self.assertNotIn("const detail = data.detail ?? data.error ?? data.message", editor_source)
+
     def test_editor_adapters_share_the_workflow_transfer_transport_boundary(self):
         client = ROOT / "static" / "js" / "workbench" / "canvas" / "workflow-transfer-client.js"
+        graph = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-graph-fragment.js"
+        http_error = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-http-error.js"
         script = f"""
 const fs = require('fs');
 const vm = require('vm');
 const requests = [];
+const downloads = [];
+const revoked = [];
 const sandbox = {{
   window: {{}}, Blob, FormData,
+  URL: {{createObjectURL: () => 'blob:workflow', revokeObjectURL: url => revoked.push(url)}},
+  document: {{
+    body: {{appendChild: link => downloads.push({{event:'append', href:link.href, download:link.download}})}},
+    createElement: () => ({{
+      href:'', download:'',
+      click: function() {{ downloads.push({{event:'click', href:this.href, download:this.download}}); }},
+      remove: function() {{ downloads.push({{event:'remove'}}); }},
+    }}),
+  }},
+  setTimeout: (callback, delay) => {{ downloads.push({{event:'timeout', delay}}); callback(); }},
   fetch: async (path, options={{}}) => {{
     requests.push({{path, options}});
     return path.endsWith('/export')
@@ -23,17 +512,113 @@ const sandbox = {{
       : {{ok:true, json: async () => ({{workflow:{{nodes:[{{id:'n1'}}], connections:[]}}}})}};
   }},
 }};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(graph))}, 'utf8'), sandbox);
+vm.runInNewContext(fs.readFileSync({json.dumps(str(http_error))}, 'utf8'), sandbox);
 vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
 (async () => {{
   const archive = await sandbox.window.WorkbenchCanvasWorkflowTransfer.exportArchive({{nodes:[{{id:'n1'}}]}}, 'flow.zip');
   const imported = await sandbox.window.WorkbenchCanvasWorkflowTransfer.importArchive(new Blob(['flow']));
-  console.log(JSON.stringify({{archiveSize:archive.size, imported, requests:requests.map(item => ({{path:item.path, method:item.options.method, body:item.options.body}}))}}));
+  const jsonExport = await sandbox.window.WorkbenchCanvasWorkflowTransfer.jsonExportBlob({{nodes:[{{id:'json'}}]}}).text();
+  sandbox.window.WorkbenchCanvasWorkflowTransfer.downloadBlob(new Blob(['download']), '', {{fallbackFilename:'fallback.json', revokeAfterMs:800}});
+  const errors = [
+    sandbox.window.WorkbenchCanvasWorkflowTransfer.errorMessage('raw failure', 'fallback'),
+    sandbox.window.WorkbenchCanvasWorkflowTransfer.errorMessage({{detail:'plain'}}, 'fallback'),
+    sandbox.window.WorkbenchCanvasWorkflowTransfer.errorMessage({{detail:[{{loc:['body', 'nodes', 0], msg:'invalid'}}]}}, 'fallback'),
+    sandbox.window.WorkbenchCanvasWorkflowTransfer.errorMessage({{detail:{{message:'nested'}}}}, 'fallback'),
+    sandbox.window.WorkbenchCanvasWorkflowTransfer.errorMessage({{}}, 'fallback'),
+  ];
+  const normalized = [
+    sandbox.window.WorkbenchCanvasWorkflowTransfer.normalizeImported(imported),
+    sandbox.window.WorkbenchCanvasWorkflowTransfer.normalizeImported([{{id:'legacy'}}]),
+    sandbox.window.WorkbenchCanvasWorkflowTransfer.normalizeImported({{nodes:[{{id:'direct'}}]}}),
+    sandbox.window.WorkbenchCanvasWorkflowTransfer.normalizeImported({{invalid:true}}),
+  ];
+  const selected = sandbox.window.WorkbenchCanvasGraphFragment.selectedSubgraph({{
+    nodes:[{{id:'a'}}, {{id:'b'}}, {{id:'c'}}],
+    connections:[{{from:'a', to:'b', state:{{live:true}}}}, {{from:'b', to:'c'}}, {{from:'c', to:'a'}}],
+    selectedIds:['b', 'missing', 'a', 'b'],
+    serializeNode:node => ({{...node, exported:true}}),
+    order:'selection',
+  }});
+  const sourceOrder = sandbox.window.WorkbenchCanvasGraphFragment.selectedSubgraph({{
+    nodes:[{{id:'a'}}, {{id:'b'}}, {{id:'c'}}], selectedIds:['c', 'a'],
+  }});
+  let nextId = 0;
+  const materialized = sandbox.window.WorkbenchCanvasGraphFragment.materializeImportedSubgraph({{
+    nodes:[{{id:'a', x:10, y:20}}, {{id:'b', x:30, y:25}}],
+    connections:[{{from:'a', to:'b', metadata:{{source:true}}}}, {{from:'b', to:'missing'}}],
+    target:{{x:100, y:200}},
+    serializeNode:node => ({{...node}}),
+    createNodeId:type => `${{type}}-${{++nextId}}`,
+    prepareNode:node => ({{...node, prepared:true}}),
+    createConnection:(connection, endpoints) => ({{...connection, ...endpoints, copied:true}}),
+  }});
+  const centered = sandbox.window.WorkbenchCanvasGraphFragment.materializeImportedSubgraph({{
+    nodes:[{{id:'left', x:10, y:20}}, {{id:'right', x:30, y:40}}],
+    target:{{x:100, y:200}}, anchor:'center',
+    serializeNode:node => ({{...node}}), createNodeId:type => `center-${{type}}`,
+  }});
+  const expanded = sandbox.window.WorkbenchCanvasGraphFragment.expandNodeIds({{
+    nodes:[{{id:'group', items:['child', 'nested']}}, {{id:'child'}}, {{id:'nested', items:['leaf']}}, {{id:'leaf'}}],
+    initialIds:['group'], childIds:node => node.items || [],
+  }});
+  const removed = sandbox.window.WorkbenchCanvasGraphFragment.removeGraphRecords({{
+    nodes:[{{id:'group'}}, {{id:'child'}}, {{id:'keep'}}],
+    connections:[{{from:'group', to:'child'}}, {{from:'keep', to:'child'}}, {{from:'keep', to:'keep'}}],
+    removeIds:expanded,
+  }});
+  console.log(JSON.stringify({{archiveSize:archive.size, imported, jsonExport, errors, normalized, selected, sourceOrder, materialized:{{nodes:materialized.nodes, connections:materialized.connections, idMap:[...materialized.idMap.entries()]}}, centered:{{nodes:centered.nodes, connections:centered.connections}}, expanded:[...expanded], removed, downloads, revoked, requests:requests.map(item => ({{path:item.path, method:item.options.method, body:item.options.body}}))}}));
 }})();
 """
         result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["archiveSize"], 7)
         self.assertEqual(payload["imported"]["workflow"]["nodes"], [{"id": "n1"}])
+        self.assertEqual(json.loads(payload["jsonExport"]), {"nodes": [{"id": "json"}]})
+        self.assertEqual(
+            payload["errors"],
+            ["raw failure", "plain", "nodes.0: invalid", "nested", "{}"],
+        )
+        self.assertEqual(payload["downloads"], [
+            {"event": "append", "href": "blob:workflow", "download": "fallback.json"},
+            {"event": "click", "href": "blob:workflow", "download": "fallback.json"},
+            {"event": "remove"},
+            {"event": "timeout", "delay": 800},
+        ])
+        self.assertEqual(payload["revoked"], ["blob:workflow"])
+        self.assertEqual(payload["normalized"], [
+            {"nodes": [{"id": "n1"}], "connections": []},
+            {"nodes": [{"id": "legacy"}], "connections": []},
+            {"nodes": [{"id": "direct"}], "connections": []},
+            {"nodes": [], "connections": []},
+        ])
+        self.assertEqual(payload["selected"], {
+            "nodes": [{"id": "b", "exported": True}, {"id": "a", "exported": True}],
+            "connections": [{"from": "a", "to": "b", "state": {"live": True}}],
+        })
+        self.assertEqual(payload["sourceOrder"], {
+            "nodes": [{"id": "a"}, {"id": "c"}],
+            "connections": [],
+        })
+        self.assertEqual(payload["materialized"], {
+            "nodes": [
+                {"id": "node-1", "x": 100, "y": 200, "prepared": True},
+                {"id": "node-2", "x": 120, "y": 205, "prepared": True},
+            ],
+            "connections": [{
+                "from": "node-1", "to": "node-2", "metadata": {"source": True}, "copied": True,
+            }],
+            "idMap": [["a", "node-1"], ["b", "node-2"]],
+        })
+        self.assertEqual(payload["centered"], {
+            "nodes": [{"id": "center-node", "x": 90, "y": 190}, {"id": "center-node", "x": 110, "y": 210}],
+            "connections": [],
+        })
+        self.assertEqual(payload["expanded"], ["group", "child", "nested", "leaf"])
+        self.assertEqual(payload["removed"], {
+            "nodes": [{"id": "keep"}],
+            "connections": [{"from": "keep", "to": "keep"}],
+        })
         self.assertEqual(payload["requests"][0]["path"], "/api/canvas-workflows/export")
         self.assertEqual(payload["requests"][0]["method"], "POST")
         self.assertEqual(json.loads(payload["requests"][0]["body"]), {
@@ -46,8 +631,29 @@ vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
             page_source = (ROOT / "static" / page).read_text(encoding="utf-8")
             editor_source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
             self.assertLess(page_source.index("workbench/canvas/workflow-transfer-client.js"), page_source.index(editor))
+            self.assertLess(page_source.index("workbench/canvas/canvas-graph-fragment.js"), page_source.index("workbench/canvas/workflow-transfer-client.js"))
             self.assertIn("WorkbenchCanvasWorkflowTransfer.exportArchive", editor_source)
             self.assertIn("WorkbenchCanvasWorkflowTransfer.importArchive", editor_source)
+            self.assertIn("WorkbenchCanvasWorkflowTransfer.normalizeImported", editor_source)
+            self.assertIn("WorkbenchCanvasWorkflowTransfer.jsonExportBlob", editor_source)
+            self.assertIn("WorkbenchCanvasWorkflowTransfer.downloadBlob", editor_source)
+            self.assertIn("WorkbenchCanvasGraphFragment.selectedSubgraph", editor_source)
+            self.assertIn("WorkbenchCanvasGraphFragment.materializeImportedSubgraph", editor_source)
+        graph_source = graph.read_text(encoding="utf-8")
+        client_source = client.read_text(encoding="utf-8")
+        self.assertIn("WorkbenchCanvasGraphFragment", graph_source)
+        self.assertNotIn("fetch(", graph_source)
+        self.assertNotIn("document.", graph_source)
+        self.assertNotIn("localStorage", graph_source)
+        self.assertIn("WorkbenchCanvasHttpError", client_source)
+        self.assertNotIn("const detail = payload.detail", client_source)
+        classic_source = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        self.assertIn("WorkbenchCanvasGraphFragment.expandNodeIds", classic_source)
+        self.assertIn("WorkbenchCanvasGraphFragment.removeGraphRecords", classic_source)
+        self.assertIn(
+            "WorkbenchCanvasGraphFragment.removeGraphRecords",
+            (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8"),
+        )
         classic_export = editor_source = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
         classic_export = classic_export[classic_export.index("async function exportSelectedWorkflow(") : classic_export.index("function defaultWorkflowAssetTarget(")]
         classic_import = editor_source[editor_source.index("async function importWorkflowFile(") : editor_source.index("function startNodeDrag(")]
@@ -57,6 +663,22 @@ vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
         for adapter in (classic_export, classic_import, smart_export, smart_import):
             self.assertNotIn("/api/canvas-workflows/export", adapter)
             self.assertNotIn("/api/canvas-workflows/import", adapter)
+        self.assertNotIn("function normalizeImportedWorkflow", editor_source)
+        self.assertNotIn("function normalizeImportedSmartWorkflow", smart)
+        self.assertNotIn("function downloadBlob", editor_source)
+        self.assertNotIn("function downloadBlob", smart)
+        self.assertNotIn("new Blob([JSON.stringify(payload, null, 2)]", classic_export)
+        self.assertNotIn("new Blob([JSON.stringify(payload, null, 2)]", smart_export)
+        classic_copy = editor_source[editor_source.index("function copySelectedNodes(){") : editor_source.index("function clipboardNodeCount(){")]
+        smart_copy = smart[smart.index("function copySelectedNodes(){") : smart.index("function pasteNodes(){")]
+        for adapter in (classic_copy, smart_copy):
+            self.assertIn("WorkbenchCanvasGraphFragment.selectedSubgraph", adapter)
+            self.assertNotIn("filter(c => ids.has(c.from) && ids.has(c.to))", adapter)
+        classic_paste = editor_source[editor_source.index("function pasteNodes(){") : editor_source.index("function selectedWorkflowPayload(){")]
+        smart_paste = smart[smart.index("function pasteNodes(){") : smart.index("// 跨页\"素材库")]
+        for adapter in (classic_paste, smart_paste):
+            self.assertIn("WorkbenchCanvasGraphFragment.materializeImportedSubgraph", adapter)
+            self.assertIn("anchor:'center'", adapter)
 
     def test_editor_adapters_share_the_canvas_record_persistence_boundary(self):
         client = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-persistence-client.js"
@@ -204,6 +826,15 @@ console.log(JSON.stringify({{match, own, stale, wrongCanvas}}));
         self.assertNotIn("touchCanvasOpened", classic)
         self.assertNotIn("/touch", opening)
 
+    def test_canvas_selection_paths_do_not_schedule_persistence(self):
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        classic_selection = classic[classic.index("el.onclick = (e) => {") : classic.index("el.oncontextmenu = e => {")]
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        smart_selection = smart[smart.index("function applySmartNodeSelection(") : smart.index("function smartSelectionToggleRequested(")]
+        smart_shell_selection = smart[smart.index("function selectSmartNodeFromShell(") : smart.index("function startSmartPortDrag(")]
+        for selection_path in (classic_selection, smart_selection, smart_shell_selection):
+            self.assertNotIn("scheduleSave(", selection_path)
+
     def test_both_canvas_pages_load_compatibility_modules_before_editor(self):
         for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
             text = (ROOT / "static" / page).read_text(encoding="utf-8")
@@ -218,6 +849,7 @@ console.log(JSON.stringify({{match, own, stale, wrongCanvas}}));
             self.assertLess(text.index("workbench/canvas/graph-interaction.js"), text.index(editor))
             self.assertLess(text.index("workbench/canvas/group-membership.js"), text.index(editor))
             self.assertLess(text.index("workbench/canvas/viewport-recovery.js"), text.index(editor))
+            self.assertLess(text.index("workbench/canvas/media-kind.js"), text.index("workbench/canvas/media-renderer.js"))
             self.assertLess(text.index("workbench/canvas/node-card-host.js"), text.index("workbench/canvas/unified-render-host.js"))
             self.assertLess(text.index("workbench/canvas/media-renderer.js"), text.index("workbench/canvas/unified-render-host.js"))
             self.assertLess(text.index("workbench/canvas/unified-render-host.js"), text.index(editor))
@@ -948,6 +1580,7 @@ console.log(JSON.stringify({{
         self.assertIn("output_refs", renderer)
         self.assertIn("mountInto", renderer)
         self.assertIn("media.preload = 'metadata'", renderer)
+        self.assertIn("WorkbenchCanvasMediaKind", renderer)
         self.assertIn("media.playsInline = true", renderer)
         self.assertIn("preserveNativeMediaInteraction(media)", renderer)
         self.assertIn("event.stopPropagation()", renderer)
@@ -960,12 +1593,13 @@ console.log(JSON.stringify({{
     def test_legacy_video_overlays_follow_the_real_playback_state(self):
         smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        controls = (ROOT / "static" / "js" / "workbench" / "canvas" / "media-preview-controls.js").read_text(encoding="utf-8")
         self.assertIn("function bindSmartVideoOverlay(video)", smart)
-        self.assertIn("['play', 'playing', 'pause', 'ended']", smart)
-        self.assertIn("['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'wheel']", smart)
+        self.assertIn("WorkbenchCanvasMediaPreviewControls.bindVideoOverlay", smart)
         self.assertIn("function bindCanvasVideoOverlay(video)", classic)
-        self.assertIn("['play', 'playing', 'pause', 'ended']", classic)
-        self.assertIn("['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'wheel']", classic)
+        self.assertIn("WorkbenchCanvasMediaPreviewControls.bindVideoOverlay", classic)
+        self.assertIn("['play', 'playing', 'pause', 'ended']", controls)
+        self.assertIn("['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'wheel']", controls)
 
     def test_semantic_zoom_mount_is_explicit_local_and_covers_node_shell_and_legacy_nodes(self):
         smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")

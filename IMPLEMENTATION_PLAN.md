@@ -168,6 +168,8 @@ Gate: durable Project/Canvas foundation and migration evidence.
 
 Complete U7 against R3 canonical authority.
 
+**R4 completion requires removal of the Classic/Smart dual-runtime product architecture, not merely a unified Canvas entry URL. Smart Canvas capabilities that remain product-relevant must first migrate into shared Unified Canvas modules or bounded compatibility adapters before duplicate runtime removal.**
+
 This remains the only active implementation priority until its Gate passes.
 
 ## Deliver
@@ -202,12 +204,18 @@ Do not merely replace an old repository URL with a new one.
 Gate:
 
 ```text
-one Canvas runtime
-+ canonical persistence active
-+ no duplicate product runtime
+one user-visible Canvas entry
++ one canonical Canvas persistence authority
++ one product Canvas runtime
++ one shared interaction/render/creation system
++ no permanent Classic/Smart product modes
++ no duplicate Classic/Smart product runtime
++ retained Smart capabilities migrated before runtime removal
 + verified conflict semantics
 + rollback evidence
 ```
+
+A unified entry URL alone does not satisfy the R4 Gate.
 
 ---
 

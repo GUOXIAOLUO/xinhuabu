@@ -24,5 +24,20 @@
         return `/static/smart-canvas.html?id=${encodeURIComponent(requiredId(canvasId, 'canvasId'))}${suffix ? `&${suffix}` : ''}`;
     }
 
-    global.WorkbenchCanvasEntryCompatibility = Object.freeze({normalCanvasUrl, requiresLegacySmartHandoff, legacySmartCanvasUrl});
+    function rememberCanvasListProject(projectId, options = {}) {
+        const project = String(projectId || options.defaultProject || 'default');
+        try { options.storage?.setItem?.(String(options.storageKey || ''), project); } catch (_error) {}
+        return project;
+    }
+
+    function rememberedCanvasListProject(options = {}) {
+        try { return options.storage?.getItem?.(String(options.storageKey || '')) || options.defaultProject || 'default'; } catch (_error) { return options.defaultProject || 'default'; }
+    }
+
+    function canvasListUrl(projectId, options = {}) {
+        const project = rememberCanvasListProject(projectId, options);
+        return `/static/canvas-list.html?project=${encodeURIComponent(project)}`;
+    }
+
+    global.WorkbenchCanvasEntryCompatibility = Object.freeze({normalCanvasUrl, requiresLegacySmartHandoff, legacySmartCanvasUrl, rememberCanvasListProject, rememberedCanvasListProject, canvasListUrl});
 }(window));

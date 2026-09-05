@@ -24,8 +24,18 @@
         }).filter(Boolean);
     }
 
+    function mediaKind(item) {
+        const classifier = global.WorkbenchCanvasMediaKind;
+        if (!classifier) throw new Error('MediaRenderer requires WorkbenchCanvasMediaKind');
+        return classifier.kindForItem({
+            url: item?.url || '',
+            kind: item?.mediaType || '',
+            name: item?.label || '',
+        }, {allowWorkflow:true});
+    }
+
     function isVideo(item) {
-        return item.mediaType === 'video' || /\.(mp4|webm|mov)(?:[?#]|$)/i.test(item.url);
+        return mediaKind(item) === 'video';
     }
 
     function preserveNativeMediaInteraction(media) {
@@ -80,7 +90,7 @@
     function mediaSummary(items) {
         const counts = new Map();
         items.forEach(item => {
-            const kind = isVideo(item) ? '视频' : /\.(mp3|wav|m4a|aac|ogg|flac)(?:[?#]|$)/i.test(item.url) || item.mediaType === 'audio' ? '音频' : '图片';
+            const kind = ({image:'图片', video:'视频', audio:'音频', text:'文本', file:'文件', workflow:'工作流'})[mediaKind(item)] || '图片';
             counts.set(kind, (counts.get(kind) || 0) + 1);
         });
         return [...counts.entries()].map(([kind, count]) => `${kind} ${count}`).join(' · ');

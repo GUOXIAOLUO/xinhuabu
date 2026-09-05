@@ -19,16 +19,7 @@ function actionFailed(labelKey, detail=''){
 }
 function noReturnedImage(labelKey){ return langIsEn() ? `${tr(labelKey)} failed: no image returned` : `${tr(labelKey)}失败：未返回图片`; }
 function canvasOriginalMediaUrl(url){
-    const raw = String(url || '');
-    if(!raw) return '';
-    try {
-        const parsed = new URL(raw, window.location.origin);
-        if(parsed.pathname === '/api/media-preview'){
-            const original = parsed.searchParams.get('url') || '';
-            return original || raw;
-        }
-    } catch(e) {}
-    return raw;
+    return window.WorkbenchCanvasMediaUrl.originalUrl(url, window.location.origin);
 }
 function canvasFileNameFromUrl(url=''){
     try {
@@ -50,12 +41,14 @@ function canvasDisplayMediaUrl(url, name=''){
     return /^https?:\/\//i.test(raw) ? canvasProxiedMediaUrl(raw, name) : raw;
 }
 function canvasMediaPreviewUrl(url, size=512){
-    const raw = canvasOriginalMediaUrl(url);
-    if(!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
-    if(!raw.startsWith('/output/') && !raw.startsWith('/assets/')) return canvasDisplayMediaUrl(raw);
-    if(!/\.(png|jpe?g|webp|gif|bmp|avif|tiff?|mp4|webm|mov|m4v|avi|mkv|flv)(\?|#|$)/i.test(raw)) return raw;
-    const width = Math.max(64, Math.min(2048, Math.round(Number(size) || 512)));
-    return `/api/media-preview?w=${width}&url=${encodeURIComponent(raw)}`;
+    return window.WorkbenchCanvasMediaUrl.previewUrl(url, {
+        locationOrigin:window.location.origin,
+        size,
+        displayUrl:raw => canvasDisplayMediaUrl(raw),
+        keepInlineUrl:true,
+        keepUnsupportedUrl:true,
+        extensions:/\.(png|jpe?g|webp|gif|bmp|avif|tiff?|mp4|webm|mov|m4v|avi|mkv|flv)(\?|#|$)/i,
+    });
 }
 function canvasPreviewImgHtml(url, size=512, attrs=''){
     const original = canvasOriginalMediaUrl(url);
@@ -65,14 +58,7 @@ function canvasPreviewImgHtml(url, size=512, attrs=''){
     return `<img loading="lazy" decoding="async" src="${escapeAttr(preview)}" data-preview-src="${escapeAttr(preview)}" data-original-src="${escapeAttr(original)}" data-url="${escapeAttr(original)}"${attrs ? ` ${attrs}` : ''}>`;
 }
 function loadCanvasOriginalImageDimensions(url){
-    const src = String(url || '');
-    if(!src || /^data:/i.test(src) || /^blob:/i.test(src)) return Promise.resolve(null);
-    return new Promise(resolve => {
-        const img = new Image();
-        img.onload = () => resolve(img.naturalWidth && img.naturalHeight ? {w:img.naturalWidth, h:img.naturalHeight} : null);
-        img.onerror = () => resolve(null);
-        img.src = src;
-    });
+    return window.WorkbenchCanvasMediaPreviewControls.loadImageDimensions(String(url || ''));
 }
 function canvasVideoPreviewHtml(url, size=512, attrs=''){
     const original = canvasOriginalMediaUrl(url);
@@ -90,19 +76,10 @@ function canvasVideoPlayerHtml(url, attrs=''){
     return `<video src="${escapeAttr(src)}" data-url="${escapeAttr(original)}" controls autoplay playsinline preload="metadata" disablepictureinpicture controlslist="nodownload noplaybackrate noremoteplayback"${attrs ? ` ${attrs}` : ''}></video>`;
 }
 function bindCanvasVideoOverlay(video){
-    if(!video || video.dataset.canvasVideoOverlayBound === '1') return;
-    video.dataset.canvasVideoOverlayBound = '1';
-    const sync = () => {
-        const overlay = video.parentElement?.querySelector?.('.canvas-video-play');
-        if(overlay) overlay.style.display = !video.paused && !video.ended ? 'none' : '';
-    };
-    ['play', 'playing', 'pause', 'ended'].forEach(type => video.addEventListener(type, sync));
-    // Keep native player controls from driving Canvas selection or rerendering.
-    // Deliberately do not preventDefault so normal browser playback remains intact.
-    ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'wheel'].forEach(type => {
-        video.addEventListener(type, event => event.stopPropagation());
+    return window.WorkbenchCanvasMediaPreviewControls.bindVideoOverlay(video, {
+        boundKey:'canvasVideoOverlayBound',
+        overlaySelector:'.canvas-video-play',
     });
-    sync();
 }
 function canvasActivateVideoPreview(img){
     if(!img) return false;
@@ -137,22 +114,11 @@ function isCanvasPreviewImage(img){
         && img.getAttribute('src') !== img.dataset.originalSrc;
 }
 function bindCanvasPreviewImageFallbacks(root=document){
-    root.querySelectorAll?.('img[data-preview-src][data-original-src]:not([data-preview-fallback-bound])').forEach(img => {
-        img.dataset.previewFallbackBound = '1';
-        img.addEventListener('error', () => {
-            const original = img.dataset.originalSrc || img.dataset.url || '';
-            if(img.dataset.previewKind === 'video'){
-                const video = document.createElement('template');
-                video.innerHTML = canvasVideoFallbackHtml(original, img.dataset.videoFallbackAttrs || '');
-                const fallback = video.content.firstElementChild;
-                img.replaceWith(fallback);
-                bindCanvasVideoOverlay(fallback);
-                return;
-            }
-            if(original && img.getAttribute('src') !== original) img.src = original;
-        });
+    return window.WorkbenchCanvasMediaPreviewControls.bindPreviewImageFallbacks(root, {
+        originalUrl:img => img.dataset.originalSrc || img.dataset.url || '',
+        videoFallbackHtml:canvasVideoFallbackHtml,
+        bindVideoOverlay:bindCanvasVideoOverlay,
     });
-    root.querySelectorAll?.('video[data-inline-video-active]').forEach(bindCanvasVideoOverlay);
 }
 const CANVAS_SELECTED_HIGH_RES_DELAY = 320;
 const CANVAS_HIGH_RES_ZOOM_THRESHOLD = 0.86;
@@ -167,17 +133,12 @@ function canvasImageEditorIsOpen(){
 function preloadCanvasSelectedHighRes(src){
     if(!src || canvasSelectedHighResLoaded.has(src)) return Promise.resolve(true);
     if(canvasSelectedHighResLoading.has(src)) return canvasSelectedHighResLoading.get(src);
-    const task = new Promise(resolve => {
-        const img = new Image();
-        img.decoding = 'async';
-        img.onload = async () => {
-            try { if(img.decode) await img.decode(); } catch(e) {}
-            canvasSelectedHighResLoaded.add(src);
-            resolve(true);
-        };
-        img.onerror = () => resolve(false);
-        img.src = src;
-    }).finally(() => canvasSelectedHighResLoading.delete(src));
+    const task = window.WorkbenchCanvasMediaPreviewControls.preloadImage(src)
+        .then(loaded => {
+            if(loaded) canvasSelectedHighResLoaded.add(src);
+            return loaded;
+        })
+        .finally(() => canvasSelectedHighResLoading.delete(src));
     canvasSelectedHighResLoading.set(src, task);
     return task;
 }
@@ -193,26 +154,14 @@ function canvasImageNearViewport(img){
         && rect.bottom >= boardRect.top - margin && rect.top <= boardRect.bottom + margin;
 }
 function syncCanvasSelectedImageResolution(root=nodesEl){
-    const selectedImages = [];
-    const wantHighRes = canvasViewportWantsHighRes();
-    root.querySelectorAll?.('.node img[data-preview-src][data-original-src]').forEach(img => {
-        if(img.dataset.previewKind === 'video') return;
-        const preview = img.dataset.previewSrc || '';
-        const original = img.dataset.originalSrc || img.dataset.url || '';
-        if(!wantHighRes || !canvasImageNearViewport(img)){
-            delete img.dataset.selectedHighResTarget;
-            if(preview && img.getAttribute('src') !== preview) img.src = preview;
-            return;
-        }
-        const target = canvasDisplayMediaUrl(original);
-        if(!target) return;
-        img.dataset.selectedHighResTarget = target;
-        if(canvasSelectedHighResLoaded.has(target)){
-            if(img.getAttribute('src') !== target) img.src = target;
-            return;
-        }
-        if(preview && img.getAttribute('src') !== preview) img.src = preview;
-        selectedImages.push({img, target});
+    const selectedImages = window.WorkbenchCanvasMediaPreviewControls.collectHighResCandidates({
+        root,
+        selector:'.node img[data-preview-src][data-original-src]',
+        wantHighRes:canvasViewportWantsHighRes(),
+        isNearViewport:canvasImageNearViewport,
+        originalUrl:img => img.dataset.originalSrc || img.dataset.url || '',
+        resolveTarget:canvasDisplayMediaUrl,
+        isLoaded:target => canvasSelectedHighResLoaded.has(target),
     });
     if(canvasSelectedHighResTimer) clearTimeout(canvasSelectedHighResTimer);
     const seq = ++canvasSelectedHighResSeq;
@@ -929,40 +878,10 @@ function showErrorModal(message, title=tr('canvas.generationFailed')){
     refreshIcons();
 }
 function apiErrorMessage(data, fallback='请求失败'){
-    if(!data) return fallback;
-    if(typeof data === 'string') return data || fallback;
-    const detail = data.detail ?? data.error ?? data.message;
-    if(typeof detail === 'string') return detail || fallback;
-    if(Array.isArray(detail)){
-        const messages = detail.map(item => {
-            if(typeof item === 'string') return item;
-            const loc = Array.isArray(item?.loc) ? item.loc.filter(x => x !== 'body').join('.') : '';
-            const msg = item?.msg || item?.message || JSON.stringify(item);
-            return loc ? `${loc}: ${msg}` : msg;
-        }).filter(Boolean);
-        return messages.join('\n') || fallback;
-    }
-    if(detail && typeof detail === 'object'){
-        return detail.message || detail.msg || JSON.stringify(detail);
-    }
-    try {
-        return JSON.stringify(data);
-    } catch(e) {
-        return fallback;
-    }
+    return window.WorkbenchCanvasHttpError.message(data, fallback);
 }
 async function responseErrorMessage(response, fallback='请求失败'){
-    try {
-        const data = await response.clone().json();
-        return apiErrorMessage(data, fallback);
-    } catch(e) {
-        try {
-            const text = await response.text();
-            return text || fallback;
-        } catch(_) {
-            return fallback;
-        }
-    }
+    return window.WorkbenchCanvasHttpError.responseMessage(response, fallback);
 }
 function closeErrorModal(){
     if(errorModal) errorModal.classList.remove('open');
@@ -979,65 +898,16 @@ async function copyErrorMessage(){
     }
 }
 function copyTextWithCopyEvent(value){
-    let handled = false;
-    const onCopy = event => {
-        event.preventDefault();
-        event.clipboardData?.setData('text/plain', value);
-        handled = true;
-    };
-    document.addEventListener('copy', onCopy);
-    try {
-        return document.execCommand('copy') && handled;
-    } catch(_) {
-        return false;
-    } finally {
-        document.removeEventListener('copy', onCopy);
-    }
+    return WorkbenchCanvasClipboard.copyWithCopyEvent(value);
 }
 function copyTextWithTextarea(value){
-    let ta = null;
-    try {
-        ta = document.createElement('textarea');
-        ta.value = value;
-        ta.setAttribute('readonly', '');
-        ta.style.position = 'fixed';
-        ta.style.left = '-9999px';
-        ta.style.top = '0';
-        ta.style.opacity = '0';
-        document.body.appendChild(ta);
-        ta.focus({preventScroll:true});
-        ta.select();
-        ta.setSelectionRange(0, ta.value.length);
-        return document.execCommand('copy');
-    } catch(_) {
-        return false;
-    } finally {
-        ta?.remove();
-    }
+    return WorkbenchCanvasClipboard.copyWithTextarea(value);
 }
 async function clipboardMatchesText(value){
-    try {
-        if(navigator.clipboard?.readText && window.isSecureContext){
-            return (await navigator.clipboard.readText()) === value;
-        }
-    } catch(_) {}
-    return null;
+    return WorkbenchCanvasClipboard.matchesText(value);
 }
 async function copyTextToClipboard(text){
-    const value = String(text || '');
-    if(!value) return false;
-    if(copyTextWithCopyEvent(value) || copyTextWithTextarea(value)){
-        const verified = await clipboardMatchesText(value);
-        return verified !== false;
-    }
-    try {
-        if(navigator.clipboard?.writeText && window.isSecureContext !== false){
-            await navigator.clipboard.writeText(value);
-            const verified = await clipboardMatchesText(value);
-            return verified !== false;
-        }
-    } catch(_) {}
-    return false;
+    return WorkbenchCanvasClipboard.copyText(text);
 }
 function parseRatioValue(value){
     const raw = String(value || '').trim();
@@ -1078,23 +948,14 @@ function ratioPartsFromDimensions(width, height){
     return {width:best.width / g, height:best.height / g};
 }
 function apiImageSize(ratioValue, resolutionValue, customRatioValue = '', customSizeValue = ''){
-    if(resolutionValue === 'auto') return 'auto';
-    if(resolutionValue === 'custom') return String(customSizeValue || '').trim();
-    const resolutionKey = resolutionValue || '1k';
-    if(ratioValue === 'custom' || ratioValue === 'source'){
-        const parsed = parseRatioValue(customRatioValue);
-        const longSide = RES_LONG_SIDE[resolutionKey] || 1024;
-        if(parsed){
-            const pixelLimit = RES_PIXEL_LIMIT[resolutionKey] || (longSide * longSide);
-            const rawWidth = parsed >= 1 ? longSide : Math.min(longSide * parsed, Math.sqrt(pixelLimit * parsed));
-            const rawHeight = parsed >= 1 ? Math.min(longSide / parsed, Math.sqrt(pixelLimit / parsed)) : longSide;
-            const width = Math.floor(rawWidth / 16) * 16;
-            const height = Math.floor(rawHeight / 16) * 16;
-            return `${Math.max(64, width)}x${Math.max(64, height)}`;
-        }
-    }
-    const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
-    return SIZE_MAP[ratioKey]?.[resolutionKey] || SIZE_MAP.square[resolutionKey] || SIZE_MAP.square['1k'];
+    return WorkbenchCanvasImageSize.apiImageSize(ratioValue, resolutionValue, {
+        customRatio:customRatioValue,
+        customSize:customSizeValue,
+        parseRatio:parseRatioValue,
+        longSideByResolution:RES_LONG_SIDE,
+        pixelLimitByResolution:RES_PIXEL_LIMIT,
+        sizeMap:SIZE_MAP,
+    });
 }
 function parseSizePair(value){
     const match = String(value || '').match(/(\d+)\s*x\s*(\d+)/i);
@@ -2641,13 +2502,11 @@ window.addEventListener('resize', () => {
     if(cropState) syncImageEditOverflow();
 });
 function rememberCanvasListProject(projectId){
-    const pid = projectId || 'default';
-    try { localStorage.setItem(CANVAS_LIST_PROJECT_KEY, pid); } catch(e){}
-    return pid;
+    return window.WorkbenchCanvasEntryCompatibility.rememberCanvasListProject(projectId, {storage:localStorage, storageKey:CANVAS_LIST_PROJECT_KEY});
 }
 
 function rememberedCanvasListProject(){
-    try { return localStorage.getItem(CANVAS_LIST_PROJECT_KEY) || 'default'; } catch(e){ return 'default'; }
+    return window.WorkbenchCanvasEntryCompatibility.rememberedCanvasListProject({storage:localStorage, storageKey:CANVAS_LIST_PROJECT_KEY});
 }
 
 function requestedCanvasListProject(){
@@ -2655,8 +2514,7 @@ function requestedCanvasListProject(){
 }
 
 function canvasListUrlForProject(projectId){
-    const pid = rememberCanvasListProject(projectId);
-    return `/static/canvas-list.html?project=${encodeURIComponent(pid)}`;
+    return window.WorkbenchCanvasEntryCompatibility.canvasListUrl(projectId, {storage:localStorage, storageKey:CANVAS_LIST_PROJECT_KEY});
 }
 
 function addNode(node){
@@ -3991,11 +3849,7 @@ function quickAdd(type){
     return createClassicMenuNode(command, point);
 }
 function mediaKindForUpload(file){
-    const type = String(file?.type || '').toLowerCase();
-    const name = String(file?.name || '').toLowerCase();
-    if(type.startsWith('video/') || /\.(mp4|webm|mov|m4v|avi|mkv)(\?|$)/.test(name)) return 'video';
-    if(type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/.test(name)) return 'audio';
-    return 'image';
+    return window.WorkbenchCanvasMediaKind.kindForFile(file, {allowText:false});
 }
 function isSupportedUploadFile(file){
     const type = String(file?.type || '').toLowerCase();
@@ -4031,28 +3885,25 @@ async function uploadFilesFromDataTransfer(dataTransfer){
     return raw.filter(isSupportedUploadFile);
 }
 function isAudioUrl(url){
-    return /\.(mp3|wav|m4a|aac|ogg|flac)(\?|$)/i.test(canvasOriginalMediaUrl(url));
+    return window.WorkbenchCanvasMediaKind.isKindForUrl(canvasOriginalMediaUrl(url), 'audio');
 }
 function isTextUrl(url){
-    return /\.(txt|json|csv|srt|vtt|md)(\?|$)/i.test(canvasOriginalMediaUrl(url));
+    return window.WorkbenchCanvasMediaKind.isKindForUrl(canvasOriginalMediaUrl(url), 'text');
 }
 function mediaKindForRef(ref){
-    const kind = String(ref?.kind || ref?.mediaKind || '').toLowerCase();
-    if(['video','audio','image','text','file'].includes(kind)) return kind;
-    const url = String(ref?.url || ref || '');
-    if(isVideoUrl(url)) return 'video';
-    if(isAudioUrl(url)) return 'audio';
-    if(isTextUrl(url)) return 'text';
-    return 'image';
+    return window.WorkbenchCanvasMediaKind.kindForItem(ref, {
+        originalUrl:item => canvasOriginalMediaUrl(item?.url || item),
+        includeFlv:true,
+    });
 }
 function imageRefsOnly(refs){
-    return (refs || []).filter(ref => ref?.url && mediaKindForRef(ref) === 'image').slice(0, CANVAS_REFERENCE_IMAGE_MAX);
+    return WorkbenchCanvasMediaReferences.refsOfKind(refs, 'image', {kindOf:mediaKindForRef, limit:CANVAS_REFERENCE_IMAGE_MAX});
 }
 function videoRefsOnly(refs){
-    return (refs || []).filter(ref => ref?.url && mediaKindForRef(ref) === 'video');
+    return WorkbenchCanvasMediaReferences.refsOfKind(refs, 'video', {kindOf:mediaKindForRef});
 }
 function isRemoteVideoReferenceUrl(url){
-    return /^https?:\/\//i.test(String(url || '')) || /^asset:\/\//i.test(String(url || ''));
+    return WorkbenchCanvasMediaReferences.isRemoteVideoReferenceUrl(url);
 }
 function tempShUploadedUrlForNode(node, url){
     const match = (node?.tempShLinks || []).find(item => item?.source === url && item?.url);
@@ -4197,7 +4048,7 @@ async function setCanvasManualVideoUrl(nodeId){
     return url;
 }
 function audioRefsOnly(refs){
-    return (refs || []).filter(ref => ref?.url && mediaKindForRef(ref) === 'audio');
+    return WorkbenchCanvasMediaReferences.refsOfKind(refs, 'audio', {kindOf:mediaKindForRef});
 }
 function mediaKindForNode(node){
     if(node?.mediaKind) return node.mediaKind;
@@ -6203,38 +6054,14 @@ function nodeHasLiveMedia(node){
     return node?.type === 'image' && node.url && ['video','audio'].includes(mediaKindForNode(node));
 }
 function captureMediaPlaybackState(media){
-    if(!media) return null;
-    return {
-        currentTime:Number.isFinite(media.currentTime) ? media.currentTime : 0,
-        paused:Boolean(media.paused),
-        playbackRate:Number.isFinite(media.playbackRate) ? media.playbackRate : 1,
-        muted:Boolean(media.muted),
-        volume:Number.isFinite(media.volume) ? media.volume : 1
-    };
+    return WorkbenchCanvasMediaPlaybackState.capture(media);
 }
 function restoreMediaPlaybackState(media, state){
-    if(!media || !state) return;
-    try { media.playbackRate = state.playbackRate || 1; } catch(e) {}
-    try { media.muted = state.muted; } catch(e) {}
-    try { media.volume = state.volume; } catch(e) {}
-    const applyTime = () => {
-        if(Number.isFinite(state.currentTime) && state.currentTime > 0 && Math.abs((media.currentTime || 0) - state.currentTime) > 0.2){
-            try { media.currentTime = state.currentTime; } catch(e) {}
-        }
-        if(!state.paused && typeof media.play === 'function'){
-            const promise = media.play();
-            if(promise?.catch) promise.catch(() => {});
-        }
-    };
-    if(media.readyState >= 1) applyTime();
-    else media.addEventListener('loadedmetadata', applyTime, {once:true});
+    WorkbenchCanvasMediaPlaybackState.restore(media, state);
 }
 function mediaSignatureFromElement(el){
     const media = el?.querySelector?.('video,audio');
-    if(!media) return '';
-    const tag = media.tagName.toLowerCase();
-    const url = media.dataset?.url || media.getAttribute('src') || '';
-    return url ? `${tag}:${url}` : '';
+    return WorkbenchCanvasMediaPlaybackState.signature(media);
 }
 function transplantNodeMediaElement(oldNodeEl, newNodeEl){
     const oldMedia = oldNodeEl?.querySelector?.('video,audio');
@@ -6249,21 +6076,10 @@ function transplantNodeMediaElement(oldNodeEl, newNodeEl){
     requestAnimationFrame(() => restoreMediaPlaybackState(oldMedia, state));
 }
 function captureMediaPlaybackStates(){
-    const states = new Map();
-    nodesEl.querySelectorAll('video[data-url], audio[data-url]').forEach(media => {
-        const tag = media.tagName.toLowerCase();
-        const url = media.dataset.url || media.getAttribute('src') || '';
-        if(url) states.set(`${tag}:${url}`, captureMediaPlaybackState(media));
-    });
-    return states;
+    return WorkbenchCanvasMediaPlaybackState.captureAll(nodesEl);
 }
 function restoreMediaPlaybackStates(states){
-    if(!states?.size) return;
-    nodesEl.querySelectorAll('video[data-url], audio[data-url]').forEach(media => {
-        const tag = media.tagName.toLowerCase();
-        const url = media.dataset.url || media.getAttribute('src') || '';
-        restoreMediaPlaybackState(media, states.get(`${tag}:${url}`));
-    });
+    WorkbenchCanvasMediaPlaybackState.restoreAll(nodesEl, states);
 }
 function measureCanvasOriginalImageNodes(root=nodesEl){
     root.querySelectorAll?.('.image-node img[data-original-src]').forEach(imgEl => {
@@ -12511,36 +12327,7 @@ function comfyResultOutputs(result){
     return resultMediaUrls(result);
 }
 function resultMediaUrls(result){
-    const urls = [];
-    const add = value => {
-        if(!value) return;
-        if(typeof value === 'string'){
-            urls.push(value);
-            return;
-        }
-        if(Array.isArray(value)){
-            value.forEach(add);
-            return;
-        }
-        if(typeof value === 'object'){
-            if(value.url || value.path || value.src || value.uri){
-                const url = value.url || value.path || value.src || value.uri;
-                if(url) urls.push({url, kind:value.kind || value.type || value.mediaKind || '', name:value.name || value.filename || ''});
-            }
-            ['outputs','videos','images','urls','data','result'].forEach(key => add(value[key]));
-            ['url','path','src','uri','output','output_url','outputUrl','video','video_url','videoUrl','mp4_url','mp4Url','download_url','downloadUrl','preview_url','previewUrl'].forEach(key => add(value[key]));
-        }
-    };
-    ['items','outputs','videos','audios','texts','files','images','urls','data','result','output','url'].forEach(key => add(result?.[key]));
-    const seen = new Set();
-    return urls.map(item => {
-        const url = outputUrlValue(item);
-        if(!url) return null;
-        return typeof item === 'object' ? item : url;
-    }).filter(item => {
-        const url = outputUrlValue(item);
-        return url && !seen.has(url) && seen.add(url);
-    });
+    return window.WorkbenchCanvasMediaResultNormalizer.extract(result);
 }
 function ltxDirectorSyncSeconds(node){
     const fps = Math.max(1, Number(node?.frameRate) || 24);
@@ -13836,17 +13623,13 @@ function outputDownloadName(url){
     return `canvas-output-${Date.now()}.${ext || 'png'}`;
 }
 function isVideoUrl(url){
-    const clean = canvasOriginalMediaUrl(url).split('?')[0].toLowerCase();
-    return /\.(mp4|webm|mov|m4v|avi|mkv|flv)$/.test(clean);
+    return window.WorkbenchCanvasMediaKind.isKindForUrl(canvasOriginalMediaUrl(url), 'video', {includeFlv:true});
 }
 function mediaKindForOutputItem(item){
-    const explicit = String(item?.kind || item?.mediaKind || '').toLowerCase();
-    if(['image','video','audio','text','file'].includes(explicit)) return explicit;
-    const url = outputUrlValue(item);
-    if(isVideoUrl(url)) return 'video';
-    if(isAudioUrl(url)) return 'audio';
-    if(isTextUrl(url)) return 'text';
-    return 'image';
+    return window.WorkbenchCanvasMediaKind.kindForItem(item, {
+        originalUrl:value => canvasOriginalMediaUrl(outputUrlValue(value)),
+        includeFlv:true,
+    });
 }
 function formatRunDuration(ms){
     const total = Math.max(0, Math.round(Number(ms || 0) / 1000));
@@ -14920,7 +14703,7 @@ assetManagerModal?.addEventListener('click', async event => {
             downloadUrl(item.url, `${item.name || 'workflow'}${String(item.url).toLowerCase().endsWith('.json') ? '.json' : '.zip'}`);
         } else if(items.length > 1) {
             const res = await fetch('/api/canvas-assets/download', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({filename:'workflows.zip', items:items.map(item => ({url:item.url, name:item.name || 'workflow'}))})});
-            if(res.ok) downloadBlob(await res.blob(), 'workflows.zip');
+            if(res.ok) window.WorkbenchCanvasWorkflowTransfer.downloadBlob(await res.blob(), 'workflows.zip', {revokeAfterMs:1200});
         }
         return;
     }
@@ -15381,14 +15164,15 @@ function copySelectedNodes(){
     if(!canvas || !selected.size) return;
     const el = document.activeElement;
     if(el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT')) return;
-    const toCopy = [...selected].map(id => nodes.find(n => n.id === id)).filter(Boolean);
-    if(!toCopy.length) return;
-    const ids = new Set(toCopy.map(n => n.id));
-    const pickedConnections = (connections || []).filter(c => ids.has(c.from) && ids.has(c.to)).map(c => ({...c}));
-    clipboard = {
-        nodes:JSON.parse(JSON.stringify(serializableCanvasNodes(toCopy))),
-        connections:JSON.parse(JSON.stringify(pickedConnections))
-    };
+    const subgraph = window.WorkbenchCanvasGraphFragment.selectedSubgraph({
+        nodes,
+        connections,
+        selectedIds:[...selected],
+        serializeNode:serializableCanvasNode,
+        order:'selection',
+    });
+    if(!subgraph.nodes.length) return;
+    clipboard = JSON.parse(JSON.stringify(subgraph));
 }
 function clipboardNodeCount(){
     if(Array.isArray(clipboard)) return clipboard.length;
@@ -15401,20 +15185,24 @@ function pasteNodes(){
     const clipConnections = Array.isArray(clipboard?.connections) ? clipboard.connections : [];
     if(!clipNodes.length) return;
     pushUndo();
-    const xs = clipNodes.map(n => n.x), ys = clipNodes.map(n => n.y);
-    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-    const dx = lastMouseBoard.x - cx;
-    const dy = lastMouseBoard.y - cy;
-    const idMap = new Map();
-    const copies = clipNodes.map(n => { const c = cloneNode(n, dx, dy); idMap.set(n.id, c.id); return c; });
+    const materialized = window.WorkbenchCanvasGraphFragment.materializeImportedSubgraph({
+        nodes:clipNodes,
+        connections:clipConnections,
+        target:lastMouseBoard,
+        anchor:'center',
+        serializeNode:serializableCanvasNode,
+        createNodeId:type => uid(type || 'n'),
+        prepareNode:copy => {
+            copy.running = false;
+            return copy;
+        },
+        createConnection:(connection, endpoints) => ({...connection, id:uid('c'), ...endpoints}),
+    });
+    const {nodes:copies, connections:newConnections, idMap} = materialized;
     copies.forEach(c => {
         if((c.type === 'group' || c.type === 'promptGroup') && c.items)
             c.items = c.items.map(id => idMap.get(id) || id);
     });
-    const newConnections = clipConnections
-        .map(c => ({...c, id:uid('c'), from:idMap.get(c.from), to:idMap.get(c.to)}))
-        .filter(c => c.from && c.to);
     nodes.push(...copies);
     connections.push(...newConnections);
     selected.clear();
@@ -15425,30 +15213,25 @@ function pasteNodes(){
     scheduleSave();
 }
 function selectedWorkflowPayload(){
-    const ids = new Set([...selected].filter(id => nodes.some(n => n.id === id)));
-    const pickedNodes = [...ids].map(id => nodes.find(n => n.id === id)).filter(Boolean);
-    const pickedConnections = connections.filter(c => ids.has(c.from) && ids.has(c.to)).map(c => ({...c}));
+    const subgraph = window.WorkbenchCanvasGraphFragment.selectedSubgraph({
+        nodes,
+        connections,
+        selectedIds:[...selected],
+        serializeNode:serializableCanvasNode,
+        order:'selection',
+    });
     return {
         format:'infinite-canvas-workflow',
         version:1,
         exported_at:Date.now(),
-        nodes:serializableCanvasNodes(pickedNodes),
-        connections:pickedConnections
+        nodes:subgraph.nodes,
+        connections:subgraph.connections
     };
 }
 function workflowFilename(ext){
     const title = (canvas?.title || 'canvas-workflow').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 48) || 'canvas-workflow';
     const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
     return `${title}-${stamp}.${ext}`;
-}
-function downloadBlob(blob, filename){
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1200);
 }
 function downloadUrl(url, filename='download'){
     if(!url) return Promise.resolve(false);
@@ -15507,13 +15290,13 @@ async function exportSelectedWorkflow(includeResources=false){
     try {
         if(!includeResources){
             const filename = workflowFilename('json');
-            downloadBlob(new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'}), filename);
+            window.WorkbenchCanvasWorkflowTransfer.downloadBlob(window.WorkbenchCanvasWorkflowTransfer.jsonExportBlob(payload), filename, {revokeAfterMs:1200});
             setStatus('已导出工作流 JSON');
             return;
         }
         const filename = workflowFilename('zip');
         const blob = await window.WorkbenchCanvasWorkflowTransfer.exportArchive(payload, filename);
-        downloadBlob(blob, filename);
+        window.WorkbenchCanvasWorkflowTransfer.downloadBlob(blob, filename, {revokeAfterMs:1200});
         setStatus('已导出包含资源的工作流包');
     } catch(err) {
         showErrorModal(err.message || '导出工作流失败', '导出工作流');
@@ -15589,40 +15372,30 @@ function findCanvasAssetCategoryForItem(itemId){
     }
     return null;
 }
-function normalizeImportedWorkflow(data){
-    if(Array.isArray(data?.nodes)) return {nodes:data.nodes, connections:Array.isArray(data.connections) ? data.connections : []};
-    if(Array.isArray(data?.workflow?.nodes)) return {nodes:data.workflow.nodes, connections:Array.isArray(data.workflow.connections) ? data.workflow.connections : []};
-    return {nodes:[], connections:[]};
-}
 function insertWorkflowIntoCanvas(imported){
     const srcNodes = (imported.nodes || []).filter(Boolean);
     const srcConnections = (imported.connections || []).filter(Boolean);
     if(!canvas || !srcNodes.length) throw new Error('工作流中没有可导入的节点');
     pushUndo();
-    const minX = Math.min(...srcNodes.map(n => Number(n.x || 0)));
-    const minY = Math.min(...srcNodes.map(n => Number(n.y || 0)));
     const target = lastMouseBoard && Number.isFinite(lastMouseBoard.x) ? lastMouseBoard : defaultPoint(0, 0);
-    const dx = target.x - minX;
-    const dy = target.y - minY;
-    const idMap = new Map();
-    const newNodes = srcNodes.map(n => {
-        const copy = JSON.parse(JSON.stringify(serializableCanvasNode(n)));
-        const oldId = copy.id || uid(copy.type || 'n');
-        copy.id = uid(copy.type || 'n');
-        copy.x = Number(copy.x || 0) + dx;
-        copy.y = Number(copy.y || 0) + dy;
-        copy.running = false;
-        idMap.set(oldId, copy.id);
-        return copy;
+    const materialized = window.WorkbenchCanvasGraphFragment.materializeImportedSubgraph({
+        nodes:srcNodes,
+        connections:srcConnections,
+        target,
+        serializeNode:n => JSON.parse(JSON.stringify(serializableCanvasNode(n))),
+        createNodeId:type => uid(type || 'n'),
+        prepareNode:copy => {
+            copy.running = false;
+            return copy;
+        },
+        createConnection:(connection, endpoints) => ({...connection, id:uid('c'), ...endpoints}),
     });
+    const {nodes:newNodes, connections:newConnections, idMap} = materialized;
     newNodes.forEach(node => {
         if((node.type === 'group' || node.type === 'promptGroup') && Array.isArray(node.items)){
             node.items = node.items.map(id => idMap.get(id) || id).filter(id => idMap.has(id) || nodes.some(n => n.id === id));
         }
     });
-    const newConnections = srcConnections
-        .map(c => ({...c, id:uid('c'), from:idMap.get(c.from), to:idMap.get(c.to)}))
-        .filter(c => c.from && c.to);
     nodes.push(...newNodes);
     connections.push(...newConnections);
     selected.clear();
@@ -15637,7 +15410,7 @@ async function importWorkflowFile(file){
     if(!canvas || !file) return;
     try {
         const data = await window.WorkbenchCanvasWorkflowTransfer.importArchive(file);
-        insertWorkflowIntoCanvas(normalizeImportedWorkflow(data));
+        insertWorkflowIntoCanvas(window.WorkbenchCanvasWorkflowTransfer.normalizeImported(data));
         closeWorkflowTransferModal();
     } catch(err) {
         showErrorModal(err.message || '导入工作流失败', '导入工作流');
@@ -16342,8 +16115,7 @@ function continueKnifeDrag(e){
     renderLinks();
 }
 function isEditableTarget(target){
-    const tag = target?.tagName;
-    return tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable || target?.closest?.('select, option');
+    return WorkbenchCanvasInteractionTargets.isEditableTarget(target);
 }
 minimap?.addEventListener('mousedown', e => {
     if(!canvas || e.button !== 0) return;
@@ -16626,20 +16398,15 @@ window.addEventListener('blur', () => {
 function deleteSelectedNodes(){
     if(!canvas || selected.size === 0) return;
     pushUndo();
-    // 收集所有需要删除的 id（含 group 的 items 一并删除）
-    const toDelete = new Set();
-    const collect = id => {
-        if(toDelete.has(id)) return;
-        toDelete.add(id);
-        const n = nodes.find(x => x.id === id);
-        if(n && (n.type === 'group' || n.type === 'promptGroup')){
-            (n.items || []).forEach(collect);
-        }
-    };
-    selected.forEach(collect);
+    const toDelete = window.WorkbenchCanvasGraphFragment.expandNodeIds({
+        nodes,
+        initialIds:[...selected],
+        childIds:node => (node.type === 'group' || node.type === 'promptGroup') ? node.items || [] : [],
+    });
     toDelete.forEach(id => destroyLTXEditor(nodes.find(n => n.id === id)));
-    nodes = nodes.filter(n => !toDelete.has(n.id));
-    connections = connections.filter(c => !toDelete.has(c.from) && !toDelete.has(c.to));
+    const remaining = window.WorkbenchCanvasGraphFragment.removeGraphRecords({nodes, connections, removeIds:toDelete});
+    nodes = remaining.nodes;
+    connections = remaining.connections;
     selected.clear();
     render();
     scheduleSave();
