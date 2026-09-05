@@ -32,6 +32,8 @@ data/audit/
 data/*.sqlite
 data/*.sqlite3
 data/*.db
+data/r3-project-canvas-migration-report.json
+data/canvas-source-backups/
 
 # Generated and user-uploaded media
 assets/input/

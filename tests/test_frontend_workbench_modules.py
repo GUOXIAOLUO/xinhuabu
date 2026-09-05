@@ -70,6 +70,8 @@ class FrontendWorkbenchModulesTests(unittest.TestCase):
         self.assertIn("function mountShellAtCardBoundary(settings)", host)
         self.assertIn("function mountCard(settings)", host)
         self.assertIn("function mountAdapterCard(settings)", host)
+        self.assertIn("function mountAdapterCards(entries)", host)
+        self.assertIn("entries.map(entry => mountAdapterCard(entry))", host)
         self.assertIn("function mountAdapterContent(settings)", host)
         self.assertIn("removeControlsBeforeMount", host)
         self.assertIn("preserveLegacyContent", host)
@@ -264,6 +266,38 @@ console.log(JSON.stringify({{calls, removed, added}}));
         self.assertEqual(mounted["removed"], [".legacy-control"])
         self.assertEqual(mounted["calls"], [["mount", ["preserved"]], "replace", "port:input", "port:output"])
         self.assertEqual(mounted["added"], ["node-shell-mounted", "legacy-renderer-mounted"])
+
+    def test_unified_render_host_mount_adapter_cards_preserves_entry_order(self):
+        unified_host = ROOT / "static" / "js" / "workbench" / "canvas" / "unified-render-host.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const calls = [];
+const sandbox = {{window: {{WorkbenchNodeCardHost: {{
+  mount: settings => {{
+    calls.push(settings.node.id);
+    return {{shell: {{element: {{querySelector: () => null}}}}, renderer: {{id: settings.node.id}}}};
+  }},
+}}}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(unified_host))}, 'utf8'), sandbox);
+function entry(id) {{
+  return {{
+    node: {{id}},
+    card: {{classList: {{add: () => {{}}}}, append: () => {{}}}},
+    contentHost: {{replaceChildren: () => {{}}}},
+  }};
+}}
+const mounted = sandbox.window.WorkbenchUnifiedRenderHost.mountAdapterCards([entry('first'), entry('second')]);
+let rejected = false;
+try {{ sandbox.window.WorkbenchUnifiedRenderHost.mountAdapterCards({{}}); }} catch (error) {{ rejected = error?.name === 'TypeError'; }}
+console.log(JSON.stringify({{calls, ids: mounted.map(item => item.renderer.id), frozen: Object.isFrozen(mounted), rejected}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        mounted = json.loads(result.stdout)
+        self.assertEqual(mounted["calls"], ["first", "second"])
+        self.assertEqual(mounted["ids"], ["first", "second"])
+        self.assertTrue(mounted["frozen"])
+        self.assertTrue(mounted["rejected"])
 
     def test_unified_render_host_mount_adapter_content_owns_card_classes(self):
         unified_host = ROOT / "static" / "js" / "workbench" / "canvas" / "unified-render-host.js"
@@ -492,6 +526,8 @@ console.log(JSON.stringify({{
         self.assertIn("creationCatalogFor('classic')", classic)
         self.assertIn("creationCatalogFor('smart')", smart)
         self.assertIn("const classicVersionedBlankNodeCreators = Object.freeze({", classic)
+        self.assertIn("output: addVersionedBlankOutputNode", classic)
+        self.assertIn("definition_ref:{type:'legacy', id:'output', version:'0'}", classic)
         self.assertIn("function createClassicMenuNode(command, point){", classic)
         self.assertIn("usesVersionedBlankCreation(command, 'classic')", classic)
         self.assertIn("const classicVersionedConnectedNodeCreators = Object.freeze({", classic)
@@ -499,6 +535,8 @@ console.log(JSON.stringify({{
         self.assertIn("function quickAdd(type){", classic)
         self.assertIn("return createClassicMenuNode(command, point);", classic)
         self.assertIn("const smartVersionedBlankNodeCreators = Object.freeze({", smart)
+        self.assertIn("minimax: point => createVersionedBlankSmartMinimax(point)", smart)
+        self.assertIn("definition_ref:{type:'legacy', id:'smart-minimax', version:'0'}", smart)
         self.assertIn("function createVersionedSmartTopLevelMenuNode(command, point){", smart)
         self.assertIn("usesVersionedBlankCreation(command, 'smart')", smart)
         self.assertIn("WorkbenchGenerationIntent?.planResultTarget({", smart)
@@ -523,6 +561,29 @@ console.log(JSON.stringify({{
             smart.index("const target = nodes.find", smart.index("function applyVersionedSmartConnectedNode")),
         )
         self.assertIn("connectInputNode(fromId, toId)", smart)
+
+    def test_smart_port_hover_uses_the_shared_data_type_compatibility_contract(self):
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        on_mouse_move = smart.index("window.onmousemove = e =>")
+        hover = smart[smart.index("if(portDragState){", on_mouse_move) : smart.index("if(promptResizeState){", on_mouse_move)]
+        self.assertIn("const hoverIntent = window.WorkbenchCanvasGraphInteraction?.edgeIntentFromPortDrop(", hover)
+        self.assertIn("WorkbenchCanvasPortCompatibility.isCompatible(", hover)
+        self.assertIn("fromNode?.output_port_type || fromNode?.port_type || 'legacy.any'", hover)
+        self.assertIn("toNode?.input_port_type || toNode?.port_type || 'legacy.any'", hover)
+
+    def test_classic_and_smart_generation_entries_delegate_to_compatibility_execution(self):
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        classic_entry = classic[classic.index("async function runCanvasGenerate(nodeId){") : classic.index("function computeCascadeOrder", classic.index("async function runCanvasGenerate(nodeId){"))]
+        smart_entry = smart[smart.index("async function runGeneration(){") : smart.index("async function runPromptLLMNode", smart.index("async function runGeneration(){"))]
+        self.assertIn("WorkbenchCanvasExecutionCompatibility?.run({", classic_entry)
+        self.assertIn("canvasKind:'classic', sourceNodeId:nodeId", classic_entry)
+        self.assertIn("execute:() => runCanvasGenerateLegacy(nodeId)", classic_entry)
+        self.assertIn("?? runCanvasGenerateLegacy(nodeId)", classic_entry)
+        self.assertIn("WorkbenchCanvasExecutionCompatibility?.run({", smart_entry)
+        self.assertIn("canvasKind:'smart', sourceNodeId:node.id", smart_entry)
+        self.assertIn("execute:() => runGenerationLegacy()", smart_entry)
+        self.assertIn("?? runGenerationLegacy()", smart_entry)
 
     def test_shared_command_catalog_orders_common_menu_items_consistently(self):
         registry = ROOT / "static" / "js" / "workbench" / "canvas" / "command-registry.js"
@@ -911,7 +972,7 @@ console.log(JSON.stringify({{
         self.assertIn('.image-node.prompt-smart-node.node-shell-mounted .workbench-node-shell__port--input', styles)
         self.assertIn('.image-node.prompt-smart-node.node-shell-mounted .workbench-node-shell__port--output', styles)
         self.assertIn('visibility\n   still follows the shared selected/hover/connection interaction contract', styles)
-        self.assertIn('WorkbenchUnifiedRenderHost.mountAdapterCard({', smart)
+        self.assertIn('WorkbenchUnifiedRenderHost.mountAdapterCards(entries);', smart)
         self.assertIn('card:el, contentHost,', smart)
         self.assertIn('function nodeShellPortElements(shellEl)', smart)
         self.assertIn('w:340, h:286', smart)

@@ -57,3 +57,11 @@ class LegacyJsonCanvasRepositoryTests(unittest.TestCase):
         self.repository.save(canvas)
         raw = json.loads(self.repository.path_for("canvas-1").read_text(encoding="utf-8"))
         self.assertEqual(raw["future_field"], {"opaque": [1, 2, 3]})
+
+    def test_list_diagnostics_marks_unreadable_source(self):
+        self.repository.save(self.canvas())
+        self.directory.mkdir(parents=True, exist_ok=True)
+        (self.directory / "broken.json").write_text("{", encoding="utf-8")
+        payloads, unreadable = self.repository.list_payloads_with_diagnostics()
+        self.assertEqual([payload["id"] for payload in payloads], ["canvas-1"])
+        self.assertTrue(unreadable)

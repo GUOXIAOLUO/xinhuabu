@@ -53,9 +53,37 @@ class GraphMutationServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphMutationError, "not permitted"):
             GraphMutationService(authorizer=Auth(False), repository=Repository(), audit_sink=Audit()).create_node_and_edge(self.command())
 
+    def test_rejects_zero_or_negative_graph_revision_before_persistence(self):
+        service = GraphMutationService(authorizer=Auth(), repository=Repository(), audit_sink=Audit())
+        for revision in (0, -1):
+            with self.subTest(revision=revision), self.assertRaisesRegex(GraphMutationError, "expected_revision must be positive"):
+                service.create_node_and_edge(self.command(expected_revision=revision))
+
     def test_constructs_edge_from_shared_node_creation_command(self):
         creation = NodeCreateCommand(request_id="request", actor_id="actor", project_id="project", canvas_id="canvas", source=NodeCreationSource.CONTEXT_MENU, definition_ref=DefinitionRef(type="legacy", id="group", version="0"), position=Position(x=1, y=2), expected_revision=1)
         result = GraphMutationService(authorizer=Auth(), repository=Repository(), audit_sink=Audit()).create_from_node_command(
             CreateNodeAndEdgeFromCreationCommand(creation=creation, edge_id="edge", existing_node_id="old"), node_preparer=Preparer(),
         )
         self.assertEqual(result.edge.to.node_id, "new")
+
+    def test_constructs_reverse_edge_with_the_same_legacy_port_contract(self):
+        creation = NodeCreateCommand(request_id="request", actor_id="actor", project_id="project", canvas_id="canvas", source=NodeCreationSource.CONTEXT_MENU, definition_ref=DefinitionRef(type="legacy", id="group", version="0"), position=Position(x=1, y=2), expected_revision=1)
+        result = GraphMutationService(authorizer=Auth(), repository=Repository(), audit_sink=Audit()).create_from_node_command(
+            CreateNodeAndEdgeFromCreationCommand(creation=creation, edge_id="edge", existing_node_id="old", direction="to_existing"), node_preparer=Preparer(),
+        )
+        self.assertEqual(result.edge.from_.node_id, "new")
+        self.assertEqual(result.edge.from_.port_id, "legacy.out")
+        self.assertEqual(result.edge.to.node_id, "old")
+        self.assertEqual(result.edge.to.port_id, "legacy.in")
+
+    def test_connected_creation_requires_revision_before_preparing_a_node(self):
+        creation = NodeCreateCommand(request_id="request", actor_id="actor", project_id="project", canvas_id="canvas", source=NodeCreationSource.CONTEXT_MENU, definition_ref=DefinitionRef(type="legacy", id="group", version="0"), position=Position(x=1, y=2))
+
+        class NeverPrepare:
+            def prepare(self, command):
+                self.fail("a missing graph revision must not prepare a node")
+
+        with self.assertRaisesRegex(GraphMutationError, "expected_revision is required"):
+            GraphMutationService(authorizer=Auth(), repository=Repository(), audit_sink=Audit()).create_from_node_command(
+                CreateNodeAndEdgeFromCreationCommand(creation=creation, edge_id="edge", existing_node_id="old"), node_preparer=NeverPrepare(),
+            )

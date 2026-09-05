@@ -2121,7 +2121,9 @@ async function createSmartCanvas(){
 }
 function openSmartCanvasPage(id){
     if(!id) return;
-    window.location.href = `/static/smart-canvas.html?id=${encodeURIComponent(id)}&v=2026.05.22.1`;
+    const entryUrl = window.WorkbenchCanvasEntryCompatibility?.legacySmartCanvasUrl(id)
+        || `/static/smart-canvas.html?id=${encodeURIComponent(id)}`;
+    window.location.href = `${entryUrl}&v=2026.05.22.1`;
 }
 function toggleEmojiPicker(id, event){
     event?.preventDefault();
@@ -2238,7 +2240,7 @@ async function openCanvas(id){
         resetCascadeRuntimeState();
         canvas = data.canvas;
         rememberCanvasListProject(canvas.project || 'default');
-        if((canvas.kind || 'classic') === 'smart'){
+        if(window.WorkbenchCanvasEntryCompatibility?.requiresLegacySmartHandoff(canvas) || (!window.WorkbenchCanvasEntryCompatibility && (canvas.kind || 'classic') === 'smart')){
             openSmartCanvasPage(canvas.id);
             return;
         }
@@ -2805,6 +2807,31 @@ async function addVersionedBlankGroupNode(point){
         return node;
     } catch(error) {
         console.error('Versioned Group creation failed', error);
+        setStatus('Create failed');
+        return null;
+    }
+}
+async function addVersionedBlankOutputNode(point){
+    if(!canUseVersionedImageCreation()) return null;
+    const p = point || defaultPoint(260, 0);
+    const undoSnapshot = {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    try {
+        const result = await window.WorkbenchNodeClient.create(canvas.id, {
+            request_id:`${CLIENT_ID}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            project_id:canvas.project, source:'context_menu',
+            definition_ref:{type:'legacy', id:'output', version:'0'},
+            position:{x:p.x, y:p.y}, expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0), title:'Output',
+        }, CLIENT_ID);
+        const node = {id:result.node.id, type:'output', x:p.x, y:p.y, images:[]};
+        nodes.push(node);
+        undoStack.push(undoSnapshot);
+        if(undoStack.length > UNDO_MAX) undoStack.shift();
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+        render();
+        return node;
+    } catch(error) {
+        console.error('Versioned Output creation failed', error);
         setStatus('Create failed');
         return null;
     }
@@ -3950,6 +3977,7 @@ const classicVersionedBlankNodeCreators = Object.freeze({
     prompt: addVersionedBlankPromptNode,
     loop: addVersionedBlankLoopNode,
     group: addVersionedBlankGroupNode,
+    output: addVersionedBlankOutputNode,
 });
 function createClassicMenuNode(command, point){
     const versionedCreator = classicVersionedBlankNodeCreators[command?.createType];
@@ -13494,10 +13522,18 @@ function computeConnectedWorkflowOrder(anchorId){
     nodes.filter(n => connected.has(n.id) && runTypes.includes(n.type)).forEach(n => visit(n.id));
     return order;
 }
-async function runCanvasGenerate(nodeId){
+async function runCanvasGenerateLegacy(nodeId){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || node.running || cascadeRunningIds.has(nodeId)) return;
     return runCascadeNodeByType(node, {cascade:false});
+}
+async function runCanvasGenerate(nodeId){
+    const node = nodes.find(n => n.id === nodeId);
+    if(!node || node.running || cascadeRunningIds.has(nodeId)) return;
+    return window.WorkbenchCanvasExecutionCompatibility?.run({
+        canvasKind:'classic', sourceNodeId:nodeId,
+        execute:() => runCanvasGenerateLegacy(nodeId),
+    }) ?? runCanvasGenerateLegacy(nodeId);
 }
 function computeCascadeOrder(targetId){
     const visited = new Set();
@@ -15749,7 +15785,13 @@ function startLink(e, originId, originKind){
             const intent = window.WorkbenchCanvasGraphInteraction?.edgeIntentFromPortDrop(
                 {nodeId:originId, port:originKind}, {nodeId:targetId, port:targetKind}
             );
-            if(intent && canConnect(intent.from, intent.to)){
+            const fromNode = nodes.find(node => node.id === intent?.from);
+            const toNode = nodes.find(node => node.id === intent?.to);
+            const portsCompatible = window.WorkbenchCanvasPortCompatibility?.isCompatible(
+                {direction:'out', dataType:fromNode?.output_port_type || fromNode?.port_type || 'legacy.any'},
+                {direction:'in', dataType:toNode?.input_port_type || toNode?.port_type || 'legacy.any'},
+            );
+            if(intent && portsCompatible !== false && canConnect(intent.from, intent.to)){
                 const {from:fromId, to:toId} = intent;
                 if(!connections.some(c => c.from === fromId && c.to === toId)){
                     pushUndo();

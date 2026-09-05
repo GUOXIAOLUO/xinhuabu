@@ -1698,65 +1698,68 @@ const smartNodeShellIntentAdapter = window.WorkbenchUnifiedRenderHost.createInte
 function handleSmartNodeShellIntent(intent){ smartNodeShellIntentAdapter(intent); }
 const SMART_NODE_SHELL_LEGACY_CONTROLS = Object.freeze(['.node-port', '.node-resize-handle']);
 function mountNodeShellForSmartGroups(){
-    world.querySelectorAll('.image-node.smart-group-node').forEach(el => {
+    const entries = Array.from(world.querySelectorAll('.image-node.smart-group-node')).flatMap(el => {
         const node = nodes.find(item => item.id === el.dataset.id);
-        if(!canUseNodeShellForSmartGroup(node)) return;
+        if(!canUseNodeShellForSmartGroup(node)) return [];
         const contentHost = el.querySelector('.node-body');
-        if(!contentHost) return;
+        if(!contentHost) return [];
         const record = canUseMediaRendererForSmartGroup(node) ? smartGroupMediaRecord(node) : window.WorkbenchCanvas.legacyNodeView(node, {projectId:canvas?.project, canvasId:canvas?.id});
         // The shell owns these interaction affordances. Keeping the Legacy
         // controls on the node would expose duplicate ports and let the
         // already-bound Legacy resize handler observe the same node.
-        const mounted = window.WorkbenchUnifiedRenderHost.mountAdapterCard({
+        return [{
             document, node:record, card:el, contentHost,
             preserveLegacyContent:!canUseMediaRendererForSmartGroup(node),
             controlSettings:{selectors:SMART_NODE_SHELL_LEGACY_CONTROLS},
             removeControlsBeforeMount:true,
             cardClasses:['node-shell-mounted'],
             ...window.WorkbenchUnifiedRenderHost.cardShellView({selected:isNodeSelected(node.id), onIntent:handleSmartNodeShellIntent}),
-        });
+        }];
     });
+    window.WorkbenchUnifiedRenderHost.mountAdapterCards(entries);
 }
 function mountNodeShellForSmartImages(){
-    world.querySelectorAll('.image-node').forEach(el => {
-        if(el.classList.contains('smart-group-member-node') || el.classList.contains('node-shell-mounted')) return;
+    const entries = Array.from(world.querySelectorAll('.image-node')).flatMap(el => {
+        if(el.classList.contains('smart-group-member-node') || el.classList.contains('node-shell-mounted')) return [];
         const node = nodes.find(item => item.id === el.dataset.id);
-        if(!canUseMediaRendererForSmartImage(node)) return;
+        if(!canUseMediaRendererForSmartImage(node)) return [];
         const contentHost = el.querySelector('.node-body');
-        if(!contentHost) return;
+        if(!contentHost) return [];
         const record = window.WorkbenchCanvas.legacyNodeView(node, {projectId:canvas?.project, canvasId:canvas?.id});
-        if(!window.WorkbenchMediaRenderer.canRender(record)) return;
-        const mounted = window.WorkbenchUnifiedRenderHost.mountAdapterCard({
+        if(!window.WorkbenchMediaRenderer.canRender(record)) return [];
+        return [{
             document, node:record, card:el, contentHost,
             controlSettings:{selectors:SMART_NODE_SHELL_LEGACY_CONTROLS},
             removeControlsBeforeMount:true,
             cardClasses:['node-shell-mounted', 'media-renderer-mounted'],
             ...window.WorkbenchUnifiedRenderHost.cardShellView({selected:isNodeSelected(node.id), onIntent:handleSmartNodeShellIntent}),
-        });
+        }];
     });
+    window.WorkbenchUnifiedRenderHost.mountAdapterCards(entries);
 }
 function mountNodeShellForSmartLegacyNodes(){
-    world.querySelectorAll('.image-node').forEach(el => {
-        if(el.classList.contains('empty-node') || el.classList.contains('smart-group-member-node') || el.classList.contains('node-shell-mounted')) return;
+    const entries = Array.from(world.querySelectorAll('.image-node')).flatMap(el => {
+        if(el.classList.contains('empty-node') || el.classList.contains('smart-group-member-node') || el.classList.contains('node-shell-mounted')) return [];
         const node = nodes.find(item => item.id === el.dataset.id);
-        if(!canUseNodeShellForSmartLegacy(node)) return;
+        if(!canUseNodeShellForSmartLegacy(node)) return [];
         const contentHost = el.querySelector(':scope > .node-body');
-        if(!contentHost) return;
+        if(!contentHost) return [];
         const record = window.WorkbenchCanvas.legacyNodeView(node, {projectId:canvas?.project, canvasId:canvas?.id});
         // Adopt, rather than recreate, the existing body. Its listeners and
         // form state therefore remain owned by the current Legacy renderer.
-        const mounted = window.WorkbenchUnifiedRenderHost.mountAdapterCard({
+        return [{
             document, node:record, card:el, contentHost, preserveLegacyContent:true,
             controlSettings:{selectors:SMART_NODE_SHELL_LEGACY_CONTROLS},
             removeControlsBeforeMount:true,
             cardClasses:['node-shell-mounted', 'legacy-renderer-mounted'],
             ...window.WorkbenchUnifiedRenderHost.cardShellView({selected:isNodeSelected(node.id), onIntent:handleSmartNodeShellIntent}),
-        });
+        }];
         // Match the original canvas geometry: connection endpoints belong to
         // the outer node, never to NodeShell's padded/bordered content box.
         // Prompt cards own their complete visual surface, so keeping ports in
         // the shell would shift both endpoints inward by the shell border.
     });
+    window.WorkbenchUnifiedRenderHost.mountAdapterCards(entries);
 }
 async function createVersionedBlankSmartPrompt(x, y){
     if(!canUseVersionedSmartImageCreation()) return null;
@@ -1790,6 +1793,25 @@ async function createVersionedBlankSmartGroup(x, y){
         nodes.push(node); selectedId = node.id; undoStack.push(undoSnapshot); if(undoStack.length > UNDO_LIMIT) undoStack.shift();
         canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now()); render(); return node;
     } catch(error) { console.error('Versioned Smart Group creation failed', error); toast(tr('smart.toastCanvasFail')); return null; }
+}
+async function createVersionedBlankSmartMinimax(point){
+    if(!canUseVersionedSmartImageCreation()) return null;
+    const x = (point?.x || 0) - 520;
+    const y = (point?.y || 0) - 320;
+    const duration = 8;
+    const undoSnapshot = snapshotForUndo();
+    try {
+        const result = await window.WorkbenchNodeClient.create(canvas.id, {
+            request_id:`${smartClientId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            project_id:canvas.project, source:'context_menu', definition_ref:{type:'legacy', id:'smart-minimax', version:'0'},
+            position:{x,y}, expected_revision:Number(canvas.updated_at || 0), title:'MiniMax H3',
+        }, smartClientId);
+        const node = {id:result.node.id, type:'smart-minimax', x, y, w:1040, h:640, title:result.node.title || 'MiniMax H3', workflow:'MiniMax_H3.json', minimaxEngine:SMART_MINIMAX_DEFAULT_ENGINE, minimaxRunningHubWorkflowId:'', duration, aspectRatio:'16:9 (Widescreen)', megapixels:0.4, promptDraftText:'', refs:{image:[], video:[], audio:[]}, materials:[], segments:[{id:uid('seg'), start:0, duration, prompt:'', refs:{image:[], video:[], audio:[]}, refItems:[], trimIn:0, trimOut:duration, result:null, results:[]}], selectedSegmentId:'', playhead:0, timelineZoom:1, minimaxPreviewH:190, minimaxVideoTrackH:70, minimaxRefLaneH:42, minimaxMuted:false, timelinePlaying:false, running:false, created_at:Date.now()};
+        smartMinimaxEnsureSegment(node);
+        nodes.push(node); selectedId = node.id; undoStack.push(undoSnapshot); if(undoStack.length > UNDO_LIMIT) undoStack.shift();
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now()); render();
+        return node;
+    } catch(error) { console.error('Versioned Smart MiniMax creation failed', error); toast(tr('smart.toastCanvasFail')); return null; }
 }
 async function createVersionedConnectedSmartGroup(point, state){
     if(!canUseVersionedSmartImageCreation()) return null;
@@ -10522,7 +10544,13 @@ function handlePortDrop(drag, e){
         const intent = window.WorkbenchCanvasGraphInteraction?.edgeIntentFromPortDrop(
             {nodeId:drag.fromId, port:drag.fromPort}, {nodeId:targetId, port:targetPort}
         );
-        if(!intent){ discardPendingUndo(); render(); return; }
+        const fromNode = nodes.find(node => node.id === intent?.from);
+        const toNode = nodes.find(node => node.id === intent?.to);
+        const portsCompatible = window.WorkbenchCanvasPortCompatibility?.isCompatible(
+            {direction:'out', dataType:fromNode?.output_port_type || fromNode?.port_type || 'legacy.any'},
+            {direction:'in', dataType:toNode?.input_port_type || toNode?.port_type || 'legacy.any'},
+        );
+        if(!intent || portsCompatible === false){ discardPendingUndo(); render(); return; }
         if(connectInputNode(intent.from, intent.to)){
             commitPendingUndo();
             render();
@@ -16973,7 +17001,7 @@ function runSmartCascadeFromLoop(loopId){
     selectedImage = {nodeId:'', index:-1};
     runSmartCascade(tail);
 }
-async function runGeneration(){
+async function runGenerationLegacy(){
     const node = selectedNode();
     if(node?.type === 'smart-minimax') return runMinimaxNode(node.id);
     const request = buildPromptRequest(node, null, true, smartLoopContext);
@@ -17154,6 +17182,14 @@ async function runGeneration(){
         }
         render();
     }
+}
+async function runGeneration(){
+    const node = selectedNode();
+    if(!node) return;
+    return window.WorkbenchCanvasExecutionCompatibility?.run({
+        canvasKind:'smart', sourceNodeId:node.id,
+        execute:() => runGenerationLegacy(),
+    }) ?? runGenerationLegacy();
 }
 async function runPromptLLMNode(nodeId){
     const node = nodes.find(n => n.id === nodeId);
@@ -18443,6 +18479,7 @@ const smartVersionedBlankNodeCreators = Object.freeze({
     prompt: point => createVersionedBlankSmartPrompt(point.x - 158, point.y - 97),
     loop: point => createVersionedBlankSmartLoop(point.x - 135, point.y - 95),
     group: point => createVersionedBlankSmartGroup(point.x - 170, point.y - 110),
+    minimax: point => createVersionedBlankSmartMinimax(point),
 });
 const smartLegacyMenuNodeCreators = Object.freeze({
     image: point => createImageNodeAt(point),
@@ -18654,7 +18691,19 @@ window.onmousemove = e => {
                 const rect = nodeEl.getBoundingClientRect();
                 targetPort = (e.clientX - rect.left) < rect.width / 2 ? 'in' : 'out';
             }
-            const compatible = (portDragState.fromPort === 'out' && targetPort === 'in') || (portDragState.fromPort === 'in' && targetPort === 'out');
+            const hoverIntent = window.WorkbenchCanvasGraphInteraction?.edgeIntentFromPortDrop(
+                {nodeId:portDragState.fromId, port:portDragState.fromPort}, {nodeId:targetId, port:targetPort}
+            );
+            const fromNode = nodes.find(node => node.id === hoverIntent?.from);
+            const toNode = nodes.find(node => node.id === hoverIntent?.to);
+            const directionCompatible = Boolean(hoverIntent);
+            const compatible = directionCompatible && (
+                !window.WorkbenchCanvasPortCompatibility ||
+                window.WorkbenchCanvasPortCompatibility.isCompatible(
+                    {direction:'out', dataType:fromNode?.output_port_type || fromNode?.port_type || 'legacy.any'},
+                    {direction:'in', dataType:toNode?.input_port_type || toNode?.port_type || 'legacy.any'},
+                )
+            );
             if(!compatible){ targetId = ''; targetPort = ''; }
         }
         portDragState.hoverTargetId = targetId;

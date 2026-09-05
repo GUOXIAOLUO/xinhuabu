@@ -84,6 +84,10 @@
         if (options.card?.classList) options.card.classList.add(...classes.filter(Boolean));
         return mounted;
     }
+    function mountAdapterCards(entries) {
+        if (!Array.isArray(entries)) throw new TypeError('UnifiedRenderHost adapter entries must be an array');
+        return Object.freeze(entries.map(entry => mountAdapterCard(entry)).filter(Boolean));
+    }
     function createIntentAdapter(handlers) {
         const callbacks = handlers || {};
         return intent => {
@@ -122,5 +126,5 @@
         });
         return removed;
     }
-    global.WorkbenchUnifiedRenderHost = Object.freeze({adoptLegacyContent, mount, mountContent, mountShellAtCardBoundary, mountCard, mountAdapterCard, mountAdapterContent, createIntentAdapter, cardShellView, removeCardControls});
+    global.WorkbenchUnifiedRenderHost = Object.freeze({adoptLegacyContent, mount, mountContent, mountShellAtCardBoundary, mountCard, mountAdapterCard, mountAdapterCards, mountAdapterContent, createIntentAdapter, cardShellView, removeCardControls});
 }(window));

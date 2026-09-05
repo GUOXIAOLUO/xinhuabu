@@ -42,5 +42,27 @@ class CanvasRepository(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def save_metadata(self, canvas: dict[str, Any]) -> dict[str, Any]:
+        """Persist metadata without changing Legacy ``updated_at`` compatibility value."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_payloads(self, *, include_deleted: bool = False) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_payloads_with_diagnostics(self, *, include_deleted: bool = False) -> tuple[list[dict[str, Any]], bool]:
+        """Return payloads plus whether unreadable source state makes destructive work unsafe."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def purge_expired_deleted(self, *, before_ms: int) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
+    def reassign_project(self, *, source_project_id: str, target_project_id: str) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
     def purge(self, canvas_id: str) -> bool:
         raise NotImplementedError

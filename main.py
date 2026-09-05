@@ -45,6 +45,9 @@ from workbench.repositories.canvas_repository import (
     StaleCanvasRevisionError,
 )
 from workbench.repositories.legacy_json_canvas_repository import LegacyJsonCanvasRepository
+from workbench.repositories.sqlite_canvas_compatibility_repository import SqliteCanvasCompatibilityRepository
+from workbench.repositories.sqlite_project_canvas_repository import LOCAL_WORKSPACE_ACTOR_ID, SqliteProjectCanvasRepository
+from workbench.application.project_canvas_migration import ProjectCanvasMigrationService
 from workbench.api.canvas_nodes import create_canvas_nodes_router
 from workbench.application.legacy_definitions import LegacyDefinitionRegistry, LegacyImageModelCompatibilityPolicy
 from workbench.application.node_creation import NodeCreationService
@@ -298,6 +301,8 @@ LOCAL_UPLOAD_DIR = os.path.join(ASSETS_DIR, "uploads")
 HISTORY_FILE = os.path.join(BASE_DIR, "history.json")
 API_ENV_FILE = os.path.join(BASE_DIR, "API", ".env")
 DATA_DIR = os.path.join(BASE_DIR, "data")
+WORKBENCH_DATABASE_PATH = os.environ.get("WORKBENCH_DATABASE_PATH", os.path.join(DATA_DIR, "workbench.sqlite3"))
+WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED = (os.getenv("WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED") or "").strip().lower() in {"1", "true", "yes"}
 CONVERSATION_DIR = os.path.join(DATA_DIR, "conversations")
 CANVAS_DIR = os.path.join(DATA_DIR, "canvases")
 MEDIA_PREVIEW_DIR = os.path.join(DATA_DIR, "media_previews")
@@ -3690,8 +3695,22 @@ def canvas_path(canvas_id):
     return os.path.join(CANVAS_DIR, f"{cleaned}.json")
 
 def canvas_repository():
-    """Return the compatibility repository backed by the current Canvas JSON directory."""
+    """Select the explicit R4 SQLite compatibility route or retained JSON route."""
+    if WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED:
+        canonical = canonical_project_canvas_repository()
+        if canonical.canvas_authority() == "sqlite":
+            return SqliteCanvasCompatibilityRepository(canonical, actor_id=LOCAL_WORKSPACE_ACTOR_ID, clock_ms=now_ms)
     return LegacyJsonCanvasRepository(CANVAS_DIR, clock_ms=now_ms, lock=CANVAS_LOCK)
+
+def canonical_project_canvas_repository():
+    """Compose the R3 SQLite authority seam; Legacy routes remain on JSON until switch verification."""
+    repository = SqliteProjectCanvasRepository(WORKBENCH_DATABASE_PATH)
+    repository.migrate()
+    return repository
+
+def project_canvas_migration_service():
+    """Expose R3 backfill/compare orchestration without adding it to Legacy route handlers."""
+    return ProjectCanvasMigrationService(canonical_project_canvas_repository())
 
 def local_node_creation_service(actor_id: str) -> NodeCreationService:
     """Build the explicitly localhost-only service for the first Legacy Image API."""
@@ -3825,21 +3844,15 @@ def _canvas_media_reference_paths(canvas):
 
 def _other_canvas_media_reference_paths(current_canvas):
     referenced = set()
-    unreadable = False
     current_id = str(current_canvas.get("id") or "")
     try:
-        filenames = os.listdir(CANVAS_DIR)
-    except OSError:
+        canvases, unreadable = canvas_repository().list_payloads_with_diagnostics(include_deleted=True)
+    except Exception:
         return referenced, True
-    for filename in filenames:
-        if not filename.endswith(".json"):
-            continue
+    for canvas in canvases:
         try:
-            if filename == f"{current_id}.json":
+            if str(canvas.get("id") or "") == current_id:
                 canvas = current_canvas
-            else:
-                with open(os.path.join(CANVAS_DIR, filename), "r", encoding="utf-8") as f:
-                    canvas = json.load(f)
             referenced.update(_canvas_media_reference_paths(canvas))
         except Exception:
             # A partially written Canvas may still own a file. Preserve candidates
@@ -4028,31 +4041,12 @@ def canvas_record(data):
 
 def cleanup_expired_canvas_trash():
     cutoff = now_ms() - CANVAS_TRASH_RETENTION_MS
-    with CANVAS_LOCK:
-        for filename in os.listdir(CANVAS_DIR):
-            if not filename.endswith(".json"):
-                continue
-            path = os.path.join(CANVAS_DIR, filename)
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                deleted_at = int(data.get("deleted_at") or 0)
-                if deleted_at and deleted_at < cutoff:
-                    os.remove(path)
-            except Exception:
-                continue
+    canvas_repository().purge_expired_deleted(before_ms=cutoff)
 
 def iter_canvas_records(include_deleted=False):
     cleanup_expired_canvas_trash()
     records = []
-    for filename in os.listdir(CANVAS_DIR):
-        if not filename.endswith(".json"):
-            continue
-        try:
-            with open(os.path.join(CANVAS_DIR, filename), 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except Exception:
-            continue
+    for data in canvas_repository().list_payloads(include_deleted=True):
         is_deleted = bool(data.get("deleted_at"))
         if include_deleted != is_deleted:
             continue
@@ -4183,14 +4177,7 @@ def canvas_assets_index():
     canvas_counts = {"all": 0, "smart": 0, "classic": 0}
     item_counts = {"all": 0, "smart": 0, "classic": 0}
     cleanup_expired_canvas_trash()
-    for filename in os.listdir(CANVAS_DIR):
-        if not filename.endswith(".json"):
-            continue
-        try:
-            with open(os.path.join(CANVAS_DIR, filename), "r", encoding="utf-8") as f:
-                canvas = json.load(f)
-        except Exception:
-            continue
+    for canvas in canvas_repository().list_payloads(include_deleted=False):
         if canvas.get("deleted_at"):
             continue
         record = canvas_record(canvas)
@@ -16438,22 +16425,7 @@ async def delete_project(project_id: str):
     projects = [p for p in projects if p.get("id") != project_id]
     save_projects(projects)
     # 把该项目下的画布迁回默认项目
-    moved = 0
-    with CANVAS_LOCK:
-        for filename in os.listdir(CANVAS_DIR):
-            if not filename.endswith(".json"):
-                continue
-            path = os.path.join(CANVAS_DIR, filename)
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-            except Exception:
-                continue
-            if str(data.get("project") or "") == project_id:
-                data["project"] = DEFAULT_PROJECT_ID
-                with open(path, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                moved += 1
+    moved = canvas_repository().reassign_project(source_project_id=project_id, target_project_id=DEFAULT_PROJECT_ID)
     return {"ok": True, "moved": moved}
 
 @app.get("/api/canvases/trash")
@@ -16496,9 +16468,7 @@ async def update_canvas_meta(canvas_id: str, payload: CanvasMetaUpdate):
         canvas["board_x"] = float(payload.board_x)
     if payload.board_y is not None:
         canvas["board_y"] = float(payload.board_y)
-    with CANVAS_LOCK:
-        with open(canvas_path(canvas["id"]), 'w', encoding='utf-8') as f:
-            json.dump(canvas, f, ensure_ascii=False, indent=2)
+    canvas_repository().save_metadata(canvas)
     return {"canvas": canvas_record(canvas)}
 
 @app.get("/api/canvases/{canvas_id}")

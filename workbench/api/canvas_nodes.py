@@ -52,6 +52,10 @@ class NodeDeletePayload(BaseModel):
 
 
 class CreateNodeAndEdgePayload(NodeCreatePayload):
+    # Connected creation is a graph transaction and must always participate in
+    # optimistic concurrency. Standalone NodeCreatePayload intentionally keeps
+    # its Legacy-compatible optional revision contract.
+    expected_revision: int = Field(ge=1)
     existing_node_id: str = Field(min_length=1, max_length=255)
     edge_id: str = Field(min_length=1, max_length=255)
     direction: str = Field(default="from_existing", pattern="^(from_existing|to_existing)$")

@@ -1,3 +1,4 @@
+import dataclasses
 import unittest
 
 from workbench.application.node_mutation import NodeDeleteCommand, NodeMutationError, NodeMutationService, NodeUpdateCommand
@@ -47,3 +48,10 @@ class NodeMutationServiceTests(unittest.TestCase):
             NodeMutationService(authorizer=Authorizer(), repository=Repository(), audit_sink=Audit()).update(
                 NodeUpdateCommand(**self.command())
             )
+
+    def test_update_command_contract_contains_only_title_and_position_mutations(self):
+        fields = {field.name for field in dataclasses.fields(NodeUpdateCommand)}
+        self.assertEqual(
+            fields,
+            {"actor_id", "project_id", "canvas_id", "node_id", "expected_revision", "title", "position"},
+        )

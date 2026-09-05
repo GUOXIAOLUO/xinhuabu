@@ -153,6 +153,14 @@ class LegacyNodeAdaptersTests(unittest.TestCase):
         self.assertEqual(node["count"], 3)
         self.assertFalse(node["showPrompt"])
 
+    def test_creates_approved_legacy_output_with_empty_images(self):
+        result = self.service.create(self.command(
+            request_id="output-request", definition_ref=LegacyDefinitionRegistry.OUTPUT,
+        ))
+        node = self.canvas_repository.load("canvas-1")["nodes"][0]
+        self.assertTrue(result.created)
+        self.assertEqual((node["type"], node["images"], node["w"], node["h"]), ("output", [], 460, 180))
+
     def test_unowned_can_be_explicitly_limited_to_local_policy(self):
         self.canvas_repository.save({"id": "unowned", "project": "project-1", "owner": "", "nodes": [], "updated_at": 100})
         strict = LegacyCanvasProjectAuthorizer(self.canvas_repository)

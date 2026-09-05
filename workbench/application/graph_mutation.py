@@ -90,6 +90,8 @@ class GraphMutationService:
         return persisted
 
     def create_from_node_command(self, command: CreateNodeAndEdgeFromCreationCommand, *, node_preparer: NodePreparer) -> GraphMutationPersistence:
+        if command.creation.expected_revision is None:
+            raise GraphMutationError("invalid_request", "expected_revision is required for connected creation")
         node, _, _ = node_preparer.prepare(command.creation)
         if not command.edge_id or not command.existing_node_id:
             raise GraphMutationError("invalid_request", "edge_id and existing_node_id are required")
@@ -102,5 +104,5 @@ class GraphMutationService:
         })
         return self.create_node_and_edge(CreateNodeAndEdgeCommand(
             actor_id=command.creation.actor_id, project_id=command.creation.project_id, canvas_id=command.creation.canvas_id,
-            expected_revision=int(command.creation.expected_revision or 0), node=node, edge=edge,
+            expected_revision=command.creation.expected_revision, node=node, edge=edge,
         ))

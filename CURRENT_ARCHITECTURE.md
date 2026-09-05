@@ -1,508 +1,335 @@
 # Current Architecture Baseline
 
-## Audit metadata
+## Document status
 
-- Audit date: 2026-09-02
-- Repository: `https://github.com/GUOXIAOLUO/canvas.git`
-- Audited revision: `544a5a0` (`2026-08-30 Remove discontinued project notices`)
-- Application version file: `2026.08.28`
-- Platform used for the audit: macOS arm64, zsh
-- Scope: repository structure, startup scripts, dependencies, frontend pages, both Canvas implementations, FastAPI routes, persistence, providers, Agent behavior, ComfyUI, events, authentication, permissions, secrets, tests, and current worktree
+This file describes the live repository verified during R0. It does not describe
+the target architecture. Target contracts remain in `TARGET_ARCHITECTURE.md`.
 
-At audit time the worktree contained pre-existing, uncommitted changes in:
+Verified from the local worktree on 2026-09-04 at commit
+`23f7895ae55bde9f76f3c1e6d4ac0f2e913531bd` (`main`, three commits ahead of
+`origin/main`). The worktree was clean before R0 documentation edits.
 
-- `main.py`
-- `static/js/canvas.js`
-- `static/js/smart-canvas.js`
+### Historical audit metadata
 
-Those changes were inspected but not modified by this architecture-baseline round.
+The preceding architecture audit was made on 2026-09-02 against `544a5a0` and
+described an earlier migration state. Its measurements are historical evidence
+only. Its claims that NodeRecord, NodeCreationService, RendererRegistry, and
+`/api/v1` node routes did not exist are not current facts and are replaced below.
 
 ## Executive finding
 
-The repository is a functional local-first AI media studio with two infinite-canvas editors, a broad provider proxy, ComfyUI and RunningHub integration, asset management, chat, JSON persistence, and basic cross-tab/LAN update notification.
+The application remains a local-first AI media studio implemented primarily by a
+19,466-line FastAPI monolith and two large browser Canvas scripts. Legacy JSON and
+filesystem data remain the default page/runtime authority. The repository now also contains versioned
+NodeRecord/EdgeRecord views, lossless Legacy adapters, restricted
+NodeCreationService/NodeMutationService/GraphMutationService boundaries,
+localhost-only `/api/v1` node routes, and opt-in shared Canvas runtime, NodeShell,
+RendererRegistry, renderer, Inspector, graph, group, and creation-catalog modules.
 
-It is not yet the target AI Workbench architecture. The current implementation is a static-page and FastAPI monolith with provider- and feature-specific nodes hard-coded into large JavaScript files and a single 19,287-line Python module. Project, Canvas, workflow, chat, asset, provider, updater, subprocess, and media-processing concerns share the same process and mostly the same source file. A versioned, pure Python NodeRecord/EdgeRecord validation and Legacy adapter seam now exists, current Canvas load/save helpers delegate to a compatibility JSON repository, and dependency-injected creation and mutation services back a localhost-only `/api/v1` read/create/update/delete slice for restricted Legacy definitions. A second scoped route atomically creates approved Smart Image, Group, Prompt, Loop, or MiniMax nodes and their connecting edge under one Canvas revision. Both editors now load side-effect-free browser compatibility helpers and a versioned-node API client; their top-level blank Image menu entry uses it on loopback only. Grouped/imported/uploaded/output-derived images remain Legacy. The API is disabled for non-loopback bindings; writes use a revision, scoped local actor check, and secret-free audit event. These seams are not yet a dynamic Skill Runtime, broadly migrated frontend entry path, provenance runtime, Knowledge Service, or enforceable production project authorization.
+These are migration seams, not the target Workbench. R3 now adds a tested SQLite
+ProjectRecord/ProjectMember/CanvasRecord repository, action-based canonical
+authorization, a lossless Legacy import/compare/rollback service, transactional
+audit/outbox, and an explicit migration-report command. SQLite authority state is
+activated after R3's verified import/compare (22 imported, none skipped or
+different). R4 adds a SQLite compatibility repository and double-gated routing;
+the default page/route runtime remains Legacy JSON, while an isolated flag-enabled
+process passed API and read-only browser acceptance. There is no DefinitionResolver,
+SkillRegistry, ProviderConnection or
+ModelAvailability registry, ExecutorRegistry, formal Asset/Artifact/Entity/
+Knowledge runtime, Workflow/Approval/Handoff runtime, or PackageRuntime. R1 adds a
+bounded Codex App Server transport seam, not an execution/domain runtime.
 
-The migration should reuse the working Canvas interaction kernel and provider execution paths while placing stable domain boundaries around them. A big-bang rewrite would risk the strongest parts of the current product.
+## Repository and runtime shape
 
-## Repository shape
+| Area | Current implementation and responsibility |
+|---|---|
+| Backend | `main.py`: FastAPI app, 165 route decorators, providers/CLIs, JSON/filesystem storage, update/subprocess/media/chat/Canvas/workflow/asset behavior, and migrated-node wiring |
+| Backend seams | `workbench/domain`, `application`, `repositories`, `api`: records, Legacy adapters/repositories, renderer manifests, node/graph services, JSONL audit, `/api/v1` router |
+| Classic Canvas | `static/canvas.html` + `static/js/canvas.js`: broad fixed-node graph editor and Legacy execution/UI |
+| Smart Canvas | `static/smart-canvas.html` + `static/js/smart-canvas.js`: media-first composer and Smart Prompt/Loop/Group/MiniMax execution/UI |
+| Shared Canvas seams | `static/js/workbench/canvas/*.js`: opt-in runtime state, geometry, graph/group intents, creation catalog/client, entry compatibility resolver, NodeShell, renderer registry/host, media/Legacy renderers, Inspector, semantic zoom, screen-space controls |
+| Projects/list | `static/canvas-list.html` + `static/js/canvas-list.js`: still exposes and routes separate Classic/Smart kinds |
+| Provider settings | API settings page and `main.py` routes: provider metadata/model lists, health checks, backend credential writes |
 
-| Area | Current files | Current responsibility |
+`python3 main.py` starts Uvicorn on `127.0.0.1:3000` by default. Explicit
+`WORKBENCH_HOST=0.0.0.0` or `::` enables unauthenticated LAN compatibility mode.
+There is no identity provider, worker process, or durable job queue.
+
+## Unified Canvas U0-U7
+
+| Stage | Status | Verified current fact |
 |---|---|---|
-| Backend | `main.py` | FastAPI app, 165 route decorators, provider adapters, storage, update system, subprocesses, media transforms, chat, Agent router, Canvas, workflow, assets |
-| Studio shell | `static/index.html` | Sidebar navigation and lazy iframe host for feature pages |
-| Classic Canvas | `static/canvas.html`, `static/js/canvas.js`, `static/css/canvas.css` | General graph editor with fixed media/generation node types |
-| Smart Canvas | `static/smart-canvas.html`, `static/js/smart-canvas.js`, `static/css/smart-canvas.css` | Media-first generation canvas with prompt, loop, group, and MiniMax nodes |
-| Canvas list/projects | `static/canvas-list.html`, `static/js/canvas-list.js` | Project and Canvas selection/creation |
-| Chat/Agent | `static/gpt-chat.html`, backend chat routes | Chat, image generation/edit routing, conversations |
-| Provider settings | `static/api-settings.html`, `static/js/api-settings.js` | Provider/model metadata and API secret entry |
-| ComfyUI settings | `static/comfyui-settings.html`, `static/js/comfyui-settings.js` | Instances and workflow/config management |
-| Asset UI | `static/asset-manager.html`, `static/js/asset-manager.js` | Local files, asset libraries, captions, classification, registration |
-| Workflows | `workflows/*.json`, `workflows/*.config.json` | Bundled ComfyUI graphs and UI field mappings |
-| Runtime data | `data/`, `assets/`, `output/`, `history.json`, `API/.env` | JSON metadata, Canvas files, media, history, secrets |
-| Tests | `tests/test_canvas_log_cleanup.py` | Canvas log deletion, media ownership cleanup, conflict behavior |
-| External tools | `CLI/`, `tools/` | Codex/Gemini/Jimeng installers and browser/Photoshop connectors |
-
-The source contains approximately 859 top-level Python functions, 77 Python classes, 882 JavaScript functions in Classic Canvas, and 1,108 JavaScript functions in Smart Canvas. These counts describe coupling and change risk; they are not quality scores.
-
-## Runtime topology
-
-```text
-Browser
-  |
-  | HTTP, SSE, WebSocket
-  v
-FastAPI process on 127.0.0.1:3000 by default
-  |-- static HTML/CSS/JavaScript and public media mounts
-  |-- JSON/filesystem persistence
-  |-- provider HTTP adapters
-  |-- Codex, Gemini, and Jimeng subprocesses
-  |-- ComfyUI LAN HTTP calls
-  |-- RunningHub/ModelScope/other remote APIs
-  `-- in-memory queue and WebSocket connection manager
-```
-
-`python3 main.py` starts Uvicorn on `127.0.0.1` by default. LAN binding is an explicit compatibility opt-in through `WORKBENCH_HOST=0.0.0.0`; it remains unauthenticated and is only appropriate on a trusted network. There is no reverse proxy, identity provider, or separate worker process in the repository baseline.
-
-## Frontend
-
-### Studio shell and navigation
-
-`static/index.html` is the application shell. It lazy-loads feature pages into same-origin iframes for Z-Image, Enhance, Klein, Angle, Online generation, GPT chat, Canvas list, assets, API settings, and ComfyUI settings.
-
-The shell synchronizes theme, language, scale, and selected-page state through `localStorage`, `postMessage`, and `BroadcastChannel`. This provides pragmatic isolation between existing pages but does not provide a unified Workbench state or component boundary.
-
-The current first-level navigation reflects individual tools more than the target three-part information architecture of Projects, Workbench, and Resources.
-
-### Frontend technology
-
-- HTML, CSS, and browser JavaScript; no package manifest or bundler is present.
-- Lucide is vendored; Tailwind CDN assets and local fonts are vendored.
-- State is held in module/global variables, Canvas JSON, and browser storage.
-- Rendering is primarily manual DOM creation and `innerHTML` replacement.
-- Pages call FastAPI routes with `fetch` directly.
-- There is no frontend type system, schema-generated client, shared domain package, or component test harness.
-
-This technology is sufficient for the first migration seams. The audit found no evidence that a React or Vue rewrite is required before NodeRecord and registry boundaries are proven.
-
-## Canvas
-
-### Two Canvas implementations
-
-The repository has two parallel editors that share backend Canvas persistence but not a single frontend kernel:
-
-| Capability | Classic Canvas | Smart Canvas |
-|---|---|---|
-| Main script | `static/js/canvas.js` | `static/js/smart-canvas.js` |
-| Stored kind | `classic` | `smart` |
-| Node focus | Graph of typed generation/media nodes | Media-first generation and iterative workflow |
-| Viewport | Saved partly in session/client behavior; backend preserves existing viewport for Classic | Persisted in Canvas JSON |
-| Node render | One `renderNode` function with type branches | One large `render` path with type branches |
-| Connections | `connections` array and type-specific `canConnect` | `canvas.connections` with ports and flow behavior |
-| Collaboration | WebSocket invalidation plus 2.5-second metadata polling | WebSocket invalidation plus metadata polling |
-
-Both implement their own selection, drag, resize, zoom, panning, minimap, connection rendering, undo-related behavior, file drop, asset integration, workflow transfer, persistence, and node execution coordination. This duplication is a major migration risk and also a source of reusable interaction behavior.
-
-### Current Canvas record
-
-A new Canvas is stored as one JSON file under `data/canvases/<canvas_id>.json` with this effective shape:
-
-```json
-{
-  "id": "opaque-id",
-  "title": "Canvas title",
-  "icon": "layers",
-  "kind": "classic",
-  "owner": "",
-  "color": "",
-  "pinned": false,
-  "project": "default",
-  "created_at": 0,
-  "updated_at": 0,
-  "nodes": [],
-  "connections": [],
-  "viewport": {"x": 0, "y": 0, "scale": 1}
-}
-```
-
-The save endpoint adds `logs` and `settings` when supplied. There is no Canvas-level `schema_version`, node version, workflow version, author identity, immutable revision, or formal validation of the arbitrary `nodes` dictionaries.
-
-### Node creation
-
-Classic Canvas has individual constructors such as `addImageNode`, `addPromptNode`, `addLoopNode`, `addGroupNode`, `addLLMNode`, `addGeneratorNode`, `addMidjourneyNode`, `addMsGenNode`, `addVideoNode`, `addMiniMaxNode`, `addRhNode`, `addLTXDirectorNode`, `addComfyNode`, and `addOutputNode`. Menu definitions are literal arrays of those types. `createNodeByType` dispatches to those functions.
-
-Smart Canvas has separate constructors for `smart-image`, `smart-prompt`, `smart-loop`, `smart-minimax`, and `smart-group`. Its HTML creation menu hard-codes upload, group, prompt, loop, and MiniMax. `createNodeFromMenu` dispatches directly.
-
-File uploads and workflow imports also construct dictionaries and append to node arrays. There is no single NodeCreationService, manifest lookup, permission check, or schema validation boundary.
-
-### Node rendering
-
-Classic `renderNode` chooses title, dimensions, ports, and body renderer with `node.type` conditionals. Generation execution repeats a similar type-dispatch list. `CANVAS_GENERATOR_TYPES` and `CANVAS_MEDIA_OUTPUT_TYPES` are literal arrays.
-
-Smart Canvas builds Node HTML inside its main `render` function and branches on the five Smart types. The node shell, toolbar, runtime state, media behavior, and type-specific configuration are interleaved.
-
-There is no RendererRegistry. Adding a new business Skill as a new type would require edits in creation, render, connection, execution, save/normalization, menu, and CSS paths.
-
-### Deletion, drag, resize, zoom, selection, and groups
-
-Both editors provide working interaction code:
-
-- pointer-driven node drag with world/screen coordinate conversion;
-- node resizing and geometry refresh;
-- board panning and wheel zoom;
-- single and multi-selection;
-- grouping and movement of group children;
-- clipboard/file drop behavior;
-- soft Canvas deletion to a 30-day recycle bin and permanent purge;
-- per-node deletion in the browser followed by debounced Canvas save.
-
-The backend performs optimistic stale-write rejection using `base_updated_at`. Classic Canvas retries or applies remote state; Smart Canvas includes a merge path based primarily on node identity and media union behavior. This is useful but is not a general operation log or CRDT.
-
-### Connections
-
-Connections are stored as dictionaries with `id`, `from`, and `to`; Smart Canvas may also store a connection kind. Classic Canvas validates connections through hard-coded type compatibility. It can auto-create an Output node when a generator output is dragged to empty space.
-
-Ports are generic visual handles, but compatibility is tied to current node types rather than manifest-declared input/output contracts. There are no versioned port schemas or typed Artifact references.
-
-### Context menus and node-entry UI
-
-Both editors support a blank-canvas context menu or double-click creation path. Classic also has link creation and input/output menus. The lists are hard-coded. There is no command palette, dynamic Skill Library source, or shared creation query.
-
-### Toolbar and Inspector
-
-Classic Canvas has a persistent top toolbar and multiple node-specific panels/modals. Smart Canvas has a central composer and node toolbars that appear with node state. MiniMax includes an internal timeline inspector.
-
-There is no generic right-side Inspector that renders configuration from Node/Skill/Renderer metadata. Complex model and provider controls live inside node bodies or the Smart composer, contrary to the target “Canvas simple, Inspector deep” split.
-
-### Minimap and semantic zoom
-
-Both editors have working minimaps that show node bounds and viewport and allow navigation. Zoom affects the Canvas world transform.
-
-There is no semantic zoom contract that changes representation at defined thresholds. Nodes remain structurally the same while the world scales, so very large graphs will become unreadable or expensive.
-
-## Backend
-
-### FastAPI application
-
-`main.py` creates one FastAPI instance and contains almost all backend behavior. It serves static files and media, defines Pydantic request models, owns filesystem locks and in-memory queues, invokes remote APIs and subprocesses, and exposes all routes.
-
-The application mounts:
-
-- `/static` from `static/`;
-- `/output` from `output/`;
-- `/assets` from `assets/`.
-
-The backend currently mixes domain policy, HTTP transport, persistence, protocol translation, process control, and file manipulation. The largest risk is not FastAPI itself; it is the absence of internal boundaries.
-
-### API surface
-
-The route surface includes:
-
-- application update checks, downloads, rollback, and backups;
-- storage settings and file deletion;
-- uploads and media conversion/preview;
-- local and shared-folder asset management;
-- RunningHub application/workflow operations;
-- Codex/Gemini/Jimeng CLI status and help;
-- providers, model discovery, and provider connection tests;
-- image, video, LLM, Midjourney, ModelScope, and ComfyUI generation;
-- conversations, chat, Agent mode, and SSE streaming;
-- projects and canvases;
-- Canvas workflow import/export;
-- asset and prompt libraries;
-- ComfyUI instances and workflow configuration.
-
-There is no `/api/v1` contract, domain-oriented Workbench API, generated API schema client, or separation between internal admin operations and project-user operations.
-
-## Events and concurrency
-
-### WebSocket
-
-`/ws/stats` accepts unauthenticated clients. The in-memory `ConnectionManager` broadcasts:
-
-- online client count;
-- newly generated images;
-- Canvas update invalidations;
-- asset-library update invalidations;
-- selected personal queue messages keyed by client ID.
-
-Clients still fetch authoritative JSON after invalidation. This is a reasonable transitional pattern, but the connection manager is process-local and cannot support multiple API processes without an event bus.
-
-### SSE
-
-`/api/chat/stream` returns `text/event-stream` for model response deltas. Codex and Gemini CLI branches emit their completed text through the same SSE shape after the subprocess returns; they are not token-streamed from a durable Agent execution record.
-
-### Polling and task state
-
-Canvas clients poll metadata as a fallback. Image and ComfyUI task endpoints expose polling-based task state. The queue is held in process memory. A process restart can lose in-flight coordination even when upstream work continues.
-
-There is no unified execution event schema, persistent job table, pause/resume state machine, approval event, or replayable audit stream.
-
-## Agent and Codex
-
-### Current Agent mode
-
-The current chat Agent is an intent router with three actions:
-
-- `chat`;
-- `generate_image`;
-- `edit_image`.
-
-It uses an LLM JSON decision when available and heuristics as fallback, then calls the selected image or chat provider. It does not inspect the current Canvas, search Skills, propose a graph, request Canvas approval, call Workbench tools, or maintain task/plan/progress/tool-call state.
-
-### Current Codex integration
-
-Codex is registered as a provider protocol. The backend locates the local `codex` executable, runs `codex exec`, can pass local image paths, and can use a GPT Image helper. Codex chat execution receives a prompt and conversation history.
-
-This makes Codex a worker/provider adapter today. There is no `CodexBridge`, App Server session abstraction, scoped Tool Runtime, Canvas selection API, or orchestration event bridge. Direct CLI details are spread through backend functions, so future Harness changes would touch product code without a boundary.
-
-## Model and API providers
-
-The provider configuration system supports OpenAI-compatible, APIMart, Gemini, Volcengine, RunningHub, Jimeng, Codex, Gemini CLI, ModelScope, and custom provider metadata. Provider records contain protocol, base URL, model lists, model name mappings, endpoints, and specialized settings.
-
-Positive current behavior:
-
-- Provider secrets are generally persisted in ignored `API/.env`, not in `data/api_providers.json`.
-- `/api/providers` returns `has_key` and a masked preview rather than the full provider key.
-- Nodes record a selected provider/model in multiple generation paths.
-- Provider-specific behavior already has named helper functions that can become adapter implementations.
-
-Gaps:
-
-- There is no independent, canonical ModelRegistry with capability metadata.
-- Provider, model, and feature dispatch are interleaved in Canvas and backend code.
-- Compatibility is inferred from node/provider lists, not declared capabilities.
-- Defaults and fallback behavior are duplicated.
-- Phase 0 replaced the Legacy raw-token response with `{ "configured": boolean }` metadata.
-- Phase 0 removed ModelScope browser-storage fallbacks and `api_key` request payloads from the Angle and Z-Image pages. Legacy request fields remain accepted but are ignored server-side.
-- Masked key previews disclose part of a secret and are unnecessary for the target contract.
-
-## ComfyUI and fixed execution nodes
-
-ComfyUI support is extensive and reusable:
-
-- multiple LAN instances;
-- image upload to instances;
-- bundled workflows and config field mappings;
-- workflow upload, update, delete, and execution;
-- prompt parameter mapping;
-- history polling and output download;
-- fixed Z-Image, Enhance, Klein, MiniMax, and custom workflow paths.
-
-The limitation is architectural: Canvas nodes and backend functions know ComfyUI workflow names and provider-specific parameter shapes. The target should keep these functions behind a `ComfyUIAdapter` and expose them to Skills as capabilities, while retaining fixed nodes through Legacy adapters.
-
-## Asset
-
-Current Asset behavior includes:
-
-- `assets/input`, `assets/output`, `assets/library`, and `assets/uploads` storage;
-- configurable storage directories;
-- drag/drop and browser uploads;
-- asset libraries and categories in JSON;
-- local asset folder operations;
-- previews, image conversion, crop, caption, and classification;
-- shared-folder registration and scanning;
-- avatar/private-asset registration with external providers;
-- Canvas asset indexing and workflow packages that may include media.
-
-There are overlapping concepts: local uploads, generated output, asset-library items, Canvas media references, shared folders, prompt libraries, and generation history each have their own record conventions. Assets do not have one canonical `asset_id` plus immutable `asset_version_id`, project ownership, content hash, provenance, and access policy.
-
-Static mounting makes stored assets directly addressable to anyone who can reach the server. Asset metadata is not permission-enforced.
-
-## Knowledge
-
-There is no separate Knowledge Service, Knowledge record, retrieval interface, embedding index, full-text index, structured query interface, scope model, or Knowledge snapshot.
-
-Prompt libraries and asset classification are useful source features but are not a Knowledge domain. The absence is a clean opportunity to introduce the required separation rather than renaming the current asset library.
-
-## Workflow
-
-The word workflow currently refers to two related but distinct forms:
-
-1. ComfyUI workflow JSON plus a UI configuration mapping under `workflows/`.
-2. A selected Canvas subgraph exported or imported as JSON/ZIP and optionally stored in the asset library.
-
-Classic and Smart Canvas can execute connected generation chains and loops. This is a useful graph execution precursor.
-
-There is no canonical WorkflowDefinition/WorkflowVersion/WorkflowRun model, immutable graph version, pause/resume/retry contract, per-node execution record, approval checkpoint, composite Skill schema, or stale dependency propagation.
-
-## Database and persistence
-
-There is no relational database in the current repository. Persistence is JSON and local files guarded by process-local `threading.Lock` instances.
-
-| Data | Current location | Notes |
-|---|---|---|
-| Projects | `data/projects.json` | Name/order/timestamps; Canvas count is derived |
-| Canvases | `data/canvases/*.json` | Entire mutable graph per file |
-| Conversations | `data/conversations/<user>/*.json` | Namespace chosen from header/IP, not authenticated identity |
-| Provider metadata | `data/api_providers.json` | Runtime-created; absent in audited checkout |
-| Provider secrets | `API/.env` | Ignored by Git; server and Legacy browser flows read it indirectly |
-| Asset library | `data/asset_library.json` | Tracked seed/runtime file |
-| Prompt libraries | `data/prompt_libraries.json` | Runtime JSON when present |
-| Shared folders | `data/shared_folders.json` | Local path registrations |
-| Workflows | `workflows/*.json` | Bundled and user-modifiable files |
-| Generation history | `history.json` | Mutable list capped in code |
-| Media | `assets/`, `output/` | Local filesystem |
-
-Risks include non-atomic writes, weak recovery, process-local locking, whole-file contention, no migrations, no referential integrity, no transaction across metadata and files, and no efficient project-scoped query path.
-
-SQLite is the appropriate first structured store, provided repositories and migrations allow PostgreSQL later. Binary files should remain outside database blobs.
-
-## Authentication and permissions
-
-There is no authentication middleware or session validation.
-
-Conversation endpoints accept `X-User-ID`; if absent, the client IP becomes the namespace. The value is sanitized for a directory name, but possession of another ID is sufficient to address that namespace. This is not identity or authorization.
-
-Projects and Canvases have no member table or permission checks. `owner` on a Canvas is display metadata. Owner, Editor, and Viewer roles are not implemented. All reachable clients can list, edit, delete, restore, and purge projects/Canvases and manage providers, files, updates, workflows, and shared folders.
-
-## Security findings
-
-### Critical
-
-1. **No authentication or authorization:** all state-changing and destructive routes are callable by any client that can reach port 3000.
-2. **Unauthenticated LAN compatibility mode:** an explicit `WORKBENCH_HOST=0.0.0.0` opt-in exposes all unauthenticated routes on the network.
-3. **Administrative code-update routes are unauthenticated:** remote update and rollback can replace application files from a network request.
-
-### High
-
-1. **CORS lacks authenticated trust boundaries:** Phase 0 replaces wildcard origins with a local default and explicit allowlist, but all API routes remain unauthenticated.
-2. **Public media mounts:** all files under mounted asset/output roots are addressable without project permission checks.
-3. **Shared-folder and local-import capability:** unauthenticated endpoints can register/read local paths, increasing local-file exposure risk.
-4. **Remote fetch/proxy surface:** several endpoints accept URLs and fetch or proxy them; consistent SSRF controls are not evident across the surface.
-5. **Subprocess surface:** Codex, Gemini, Jimeng, ffmpeg, and helper tools run in the API process. Allowlist checks exist in some help endpoints, but there is no unified Tool Permission policy or audit trail.
-6. **Upload trust:** size and extension checks exist in several paths, but content validation, malware policy, project quotas, and consistent safe extraction rules are incomplete.
-
-### Medium
-
-1. Phase 0 ignores local secrets, generated runtime records, media, previews, databases, and development caches; tracked seed/template boundaries still need review as persistence migrates.
-2. Masked secret previews are returned to browsers.
-3. WebSocket client IDs and online counts are unauthenticated and process-local.
-4. Errors and debug `print` calls are widespread; a central redaction policy is absent.
-5. JSON writes are not consistently write-temp, fsync, and atomic-replace operations.
-
-No literal secret value was read during this audit. `API/.env` was checked only for presence/key names and was empty in the audited workspace.
-
-## Technical debt
-
-| Severity | Debt | Consequence |
-|---|---|---|
-| Severe | `main.py` owns nearly every backend concern | High regression risk and difficult test isolation |
-| Severe | Two independent, very large Canvas implementations | Duplicate fixes, divergent behavior, difficult migration |
-| Severe | Node type conditionals span create/render/connect/execute/storage | New capabilities require broad edits |
-| Severe | No authentication/project authorization | Unsafe LAN/multi-user operation |
-| High | JSON/filesystem records have no migration/version layer | Schema changes are implicit and hard to roll back |
-| High | Provider adapters are not a registry contract | Model capability checks and user-selection rules are inconsistent |
-| High | Agent means image intent router, not Workbench orchestrator | Target Codex workflows cannot be implemented safely on current boundary |
-| High | Asset identity is URL/path-oriented | Version, provenance, permissions, and stale tracking are weak |
-| High | No Knowledge domain | Industry knowledge cannot be scoped or snapshotted correctly |
-| Low | Direct PyPI TLS handshakes can fail in this environment; the documented `uv --system-certs` mirror fallback installed the constrained dependency set and completed the test suite | Keep the fallback documented until direct PyPI is reliable |
-| Medium | Runtime/source separation is now documented and ignored, but current JSON persistence still overlaps local source-adjacent paths | User state can still leak into releases if ignored paths are deliberately force-added |
-| Medium | Manual DOM rendering and global state | UI boundaries and component tests are difficult |
-| Medium | No semantic zoom | 100–300-node project readability is unproven |
-
-## Reuse, refactor, and Legacy classification
-
-### Reuse directly behind stable interfaces
-
-- world/screen coordinate transforms;
-- node drag, resize, pan, zoom, selection, grouping, minimap, and edge geometry;
-- Canvas JSON load/save behavior and stale-write detection as a compatibility repository;
-- asset upload, preview, crop, and media conversion primitives;
-- ComfyUI instance/workflow execution primitives;
-- provider HTTP request and response parsing helpers;
-- RunningHub workflow discovery/execution helpers;
-- Canvas workflow JSON/ZIP import/export mechanics;
-- SSE formatting and WebSocket invalidation pattern;
-- current browser-first deployment and static UI during the initial migration.
-
-### Refactor progressively
-
-- route registration and domain services out of `main.py`;
-- Canvas state normalization and creation into shared services;
-- render dispatch into NodeShell and RendererRegistry;
-- provider/model metadata into ModelRegistry and provider adapters;
-- assets into canonical records, versions, and repositories;
-- Canvas graph execution into Workflow Runtime;
-- chat/Codex subprocess integration behind CodexBridge;
-- JSON persistence behind repository interfaces and migration tooling;
-- iframe tool navigation toward Projects/Workbench/Resources without breaking Legacy pages.
-
-### Preserve through Legacy adapters
-
-Classic node kinds:
-
-- `image`
-- `prompt`
-- `loop`
-- `group`
-- `promptGroup`
-- `llm`
-- `generator`
-- `midjourney`
-- `msgen`
-- `video`
-- `minimax`
-- `rh`
-- `comfy`
-- `ltxDirector`
-- `output`
-
-Smart node kinds:
-
-- `smart-image`
-- `smart-prompt`
-- `smart-loop`
-- `smart-minimax`
-- `smart-group`
-
-Historical/imported generator type labels such as `zimage`, `enhance`, `klein`, `workflow-custom`, and `minimax-h3` also require fixture coverage where they appear in stored logs or workflow packages.
-
-### Do not reuse as target contracts
-
-- arbitrary node dictionaries without `schema_version`;
-- browser-visible provider tokens;
-- IP or client-supplied header as identity;
-- provider names as Canvas business types;
-- direct `nodes.push(<node>)` from every entry path;
-- raw filesystem path as an Asset identity;
-- chat conversation as project truth;
-- in-memory queue as durable workflow execution state.
-
-## Gap analysis
-
-| Target capability | Current state | Gap |
-|---|---|---|
-| Generic Workbench Core | Tool-oriented monolith | Domain modules and pack boundary absent |
-| NodeRecord | Unversioned dictionaries by Canvas type | Canonical schema, adapter, validation, versions absent |
-| NodeShell | Repeated/interleaved node markup | Shared shell contract absent |
-| RendererRegistry | Type conditionals | Registration and finite renderer manifests absent |
-| SkillRegistry | No Workbench Skills | Discovery, validation, enable/disable/reload absent |
-| ModelRegistry | Provider lists and node selectors | Capability metadata and compatibility filter absent |
-| CanvasAPI | CRUD exists at whole-Canvas HTTP level | Stable node/edge/group domain commands absent |
-| CodexBridge | Direct CLI provider calls | Harness abstraction, tools, events, approvals absent |
-| Agent Panel | Chat page and busy bubble | Task/plan/progress/tool/approval UI absent |
-| Asset Service | Several file/library systems | Canonical identity, version, project ownership absent |
-| Knowledge Service | Not implemented | Entire domain and retrieval contract absent |
-| Workflow Runtime | Canvas chains plus Comfy graphs | Version/run/pause/retry/approval runtime absent |
-| Provenance | Partial logs/model fields | Formal immutable lineage absent |
-| Outdated propagation | Not implemented | Dependency graph/version comparison absent |
-| Approval/Frozen | Not implemented | State policy and human action absent |
-| Industry Pack runtime | Not implemented | Pack discovery and WholeHouse package absent |
-| Owner/Editor/Viewer | Display-only owner | Authentication, membership, enforcement absent |
-
-## Baseline verification result
-
-- `main.py` parsed successfully with the Python AST parser.
-- `node --check static/js/canvas.js` passed.
-- `node --check static/js/smart-canvas.js` passed.
-- The discovered Node executable was `/Users/lo/.local/node-v24.20.0/bin/node`, version `v24.20.0`.
-- The project `.venv` installed its constrained dependencies on macOS arm64 using `uv --system-certs` and the documented mirror fallback; no global Python was modified.
-- `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -v` passed all 37 tests, including Canvas log/media, Legacy fixture, path containment, event contracts, secret-boundary redaction, exposure, and workflow archive round-trip checks.
-- A local runtime smoke test on `127.0.0.1:3300` returned `local_only` exposure metadata from `/api/app-info` and HTTP 200 from the static entry point; the temporary process was stopped cleanly.
-
-## Immediate conclusion
-
-Phase 0 should freeze representative Legacy Canvas fixtures, create a reproducible test environment, close the raw-browser-secret path, narrow exposure defaults, and introduce module seams without changing behavior.
-
-Phase 1 should introduce the canonical NodeRecord schema, Legacy adapters, centralized state vocabulary, and NodeCreationService behind compatibility flags. Existing node renderers and execution functions should remain in place until their adapter tests pass and the dynamic Skill Gate is ready.
+| U0 | complete | Approved proposal, inventory, Classic/Smart fixtures, lossless round-trip tests, and unique-entry compatibility contract exist. |
+| U1 | complete | Both adapters can opt into one side-effect-free CanvasRuntime for viewport, selection, move, resize, and geometry. Default is off. |
+| U2 | complete | Shared graph geometry, port-drop intent, port compatibility, group membership, and command seams are used by both adapters. Smart port hover and final drop both use the shared data-type contract; complete interaction ownership remains in Legacy scripts pending U7. |
+| U3 | complete | NodeShell, browser RendererRegistry, NodeCardHost, UnifiedRenderHost, two renderers, Inspector, semantic zoom, and screen-space controls exist with opt-in adapters/tests. Smart Group, Image, and Legacy node adapters submit batch card mounts through the shared host; its behavioral test verifies ordered frozen results and invalid-input rejection. Rendering remains split and gated pending U7. |
+| U4 | complete | Shared creation catalog/IDs and restricted versioned blank/connected paths exist. Classic blank Image/Prompt/Loop/Group/Output and Smart blank Image/Prompt/Loop/Group/MiniMax menu creation can use NodeCreationService only on the explicitly enabled loopback compatibility path. Unmigrated constructors, uploads/imports, menus, and direct Legacy mutations remain compatibility paths. |
+| U5 | complete | Shared result-placement intent and a narrow Classic/Smart compatibility execution wrapper exist. Behavioral tests verify frozen completion metadata, retained-error failure metadata, and both page entries delegating to the wrapper with Legacy fallbacks; Legacy execution remains authoritative. No unified executor adapter/runtime exists. |
+| U6 | complete | Canvas list creates one normal Canvas choice, hides Legacy source-kind labels, and opens `canvas.html` for every record. A shared side-effect-free entry resolver scopes historical Smart handoff to records that require it. One runtime is intentionally not complete until U7. |
+| U7 | in progress | SQLite compatibility persistence, source backup, metadata/list/trash/project-reassignment repository paths, and a double-gated selector exist. Legacy JSON remains active; Classic/Smart duplicate runtime/page removal has not occurred. |
+
+### Feature and compatibility gates
+
+Backend defaults:
+
+- `WORKBENCH_HOST=127.0.0.1`; `WORKBENCH_PORT=3000` (validated 1-65535).
+- `WORKBENCH_ALLOWED_ORIGINS` defaults to loopback origins for that port and rejects
+  wildcard origins.
+- `WORKBENCH_LAN_ENABLED` is false unless host is `0.0.0.0` or `::`.
+- `WORKBENCH_NODE_API_ENABLED` is true only for loopback host values; the `/api/v1`
+  router is not registered in LAN mode.
+- `WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED` defaults false. When explicitly true,
+  it selects SQLite compatibility persistence only if SQLite authority state is
+  `sqlite`; the false/default path neither selects nor initializes SQLite.
+
+Browser URL gates are all off when absent: `unified_canvas=1`, `node_shell=1`,
+`legacy_renderer=1`, `media_renderer=1`, `semantic_zoom=1`, and
+`screen_space_controls=1`. Renderer/Shell paths also require loopback; semantic zoom
+requires NodeShell. The benchmark harness forwards only this allowlist.
+
+## Persistence and record contracts
+
+Canvases remain mutable `data/canvases/<id>.json` files at the active runtime
+authority. R3 also provides `SqliteProjectCanvasRepository`, which stores complete
+lossless Legacy payload JSON with separately versioned ProjectRecord, ProjectMember,
+CanvasRecord metadata, logical Canvas revision, and explicit authority state. Its
+`legacy_json` default is intentional: import/backfill and payload comparison must
+pass before a controlled `sqlite` state can be activated; rollback exports the
+original payloads and restores `legacy_json`.
+`LegacyJsonCanvasRepository` preserves unknown fields, hides soft-deleted records,
+and serializes changes under a process-local lock. `updated_at` advances
+monotonically and acts as the compatibility revision; it is not a canonical logical
+`CanvasRecord.revision`. Whole-Canvas Legacy routes remain authoritative. Migrated
+node APIs write compatible dictionaries into the same files. Opening a Classic
+Canvas no longer performs a touch write.
+
+`workbench.node/1` and `workbench.edge/1` Pydantic models and JSON schemas exist.
+NodeRecord contains identity/project/canvas, finite Core kind, versioned definition
+and renderer references, NodeState, title/geometry, ports, dictionary input
+bindings, AssetVersion/ArtifactVersion output refs, optional ModelBinding,
+config/provenance, actor/timestamps, positive revision, metadata, and extensions.
+ModelBinding requires `provider_id` and `model_id` together but does not identify a
+canonical ModelAvailability. EdgeRecord has explicit node/port endpoints,
+active/disabled state, metadata, and positive revision. Legacy adapters use
+`legacy.out`/`legacy.in`, derive revision from `updated_at`, and retain the complete
+source payload for lossless round-trip. These records are validated views, not a
+separate persistence authority.
+
+## NodeCreationService
+
+The command contract enumerates context menu, command palette, Skill Library drag,
+file drop, workflow import, Agent proposal, and Legacy sources; not all product entry
+paths have migrated. Classic blank Image, Prompt, Loop, Group, and Output plus Smart
+blank Image, Prompt, Loop, Group, and MiniMax context-menu creation use the restricted
+service path only when explicitly enabled on loopback.
+The service validates identity and an optional positive
+expected revision, calls `can_edit`, resolves through temporary
+`LegacyDefinitionRegistry`, checks definition enabled/version, rejects an absent or
+incompatible model when applicable, constructs NodeRecord, and uses an injected
+repository. Current Legacy definitions require no model and the policy rejects any
+supplied model rather than silently substituting it.
+
+The Legacy repository supports approved Image, Prompt, Loop, Group, Output, Smart Prompt,
+Smart Loop, Smart Group, and Smart MiniMax shapes. It persists idempotency request
+metadata. Missing expected revision is allowed for standalone creation; supplied
+revisions use `updated_at` conflict checking. Persistence precedes JSONL audit and
+the two writes are not atomic.
+
+## NodeMutationService
+
+The update command can mutate exactly `title` and `position`; deletion is also
+supported. Both require `can_edit` and a positive expected revision. The current
+Legacy repository limits update/delete to Image nodes, and deletion removes
+connected edges. Canvas persistence occurs before JSONL audit and is not atomic
+with it.
+
+## GraphMutationService
+
+The only supported graph transaction is create-one-node plus create-one-edge. It
+validates identity, positive expected revision, Canvas identity, an edge reference
+to the new node, and `can_edit`. `create_from_node_command` prepares through
+NodeCreationService and builds `legacy.out`/`legacy.in` endpoints. The Legacy
+repository appends a restricted node and `{id, from, to, kind: "input"}` edge under
+one Canvas lock/revision. Persistence and JSONL audit remain separate.
+
+Standalone Node creation keeps Legacy-compatible optional `expected_revision`.
+Connected creation is now explicitly different: `CreateNodeAndEdgePayload` requires
+a positive revision, and `create_from_node_command` rejects a missing revision before
+preparing a node. It passes the supplied revision unchanged into the graph mutation;
+no missing value is normalized to `0`. This R2 repair preserves stale-write behavior
+without changing NodeRecord or persistence authority.
+
+## Rendering and shared Canvas modules
+
+Python and browser RendererRegistry foundations exist. Python resolves versioned
+RendererManifest records. Browser NodeCardHost registers MediaRenderer and a
+source-payload LegacyRenderer, constructs NodeShell, and UnifiedRenderHost supplies
+a page-neutral card boundary plus a batch adapter-card mounting entry point. Smart
+Group, Image, and Legacy node adapters construct their card entries and pass them to
+that shared entry point. NodeShell owns generic chrome, title/status,
+selection/focus/menu/delete, drag/resize/connect intents, ports, content/toolbar
+slots, and a model label; it owns neither persistence nor execution. Both pages have
+opt-in adapters but retain large type-specific bodies, controls, rendering, and
+execution. Node Inspector is read-only/ephemeral; target mutation UX is absent.
+
+R2 adds a browser-side `WorkbenchCanvasPortCompatibility` contract. Both Legacy
+page adapters delegate final port-drop acceptance to it before their existing
+connection/persistence state machines run; Smart also delegates typed port-hover
+eligibility to it. Unspecified Legacy ports use
+`legacy.any` and remain compatible; explicitly typed endpoints must match. The
+module is DOM/storage/network-free and does not branch on node or provider type.
+
+R2 also adds `WorkbenchCanvasExecutionCompatibility`. The Classic generic-generation
+entry and Smart primary-generation entry delegate through this wrapper, which
+normalizes completion/failure metadata around the existing callbacks. It neither
+selects nor substitutes a model/provider/runtime, persists data, or implements an
+ExecutorRegistry; retained Legacy functions still execute and place results.
+
+## Provider/model/settings and Codex
+
+Provider metadata is normalized in `main.py`, seeded from built-in/static files,
+and written to `data/api_providers.json`. Model lists/protocol maps remain provider
+fields and frontend selectors. Secrets are written to ignored `API/.env`; public
+responses expose configuration state/masked metadata, not raw keys. The Legacy
+`/api/config/token` returns only `{configured: boolean}` and Legacy ModelScope key
+payloads are ignored. There is no ProviderDefinition/ProviderConnection split,
+CredentialRef, ModelRegistry, ModelAvailability, capability vocabulary, or shared
+compatibility service.
+
+Codex remains a provider/worker compatibility path. `main.py` locates `codex` or
+`CODEX_BIN` and invokes `codex exec --cd <repository> --sandbox workspace-write
+--skip-git-repo-check`, optionally passing model/images/output-last-message, with a
+bounded timeout.
+
+R1 adds `workbench.codex.CodexBridge`, a narrow async stdio JSONL bridge for Codex
+App Server protocol v2. It was verified with installed `codex-cli 0.153.1` and its
+generated schema. `HarnessLaunchPolicy` constrains cwd to the configured workspace,
+allowlists child environment variables, uses read-only/no-network turns and
+`approvalPolicy: never`, normalizes server events, denies server requests by
+default, and supports thread start/resume, simple turns, model/config discovery,
+interruption, shutdown, and explicit recovery. It exposes no Workbench domain tools,
+does not persist raw events, and is not wired into Legacy HTTP routes. The existing
+`codex exec` flow is retained through a compatibility adapter boundary.
+
+## Authority map
+
+| Domain | Current authority |
+|---|---|
+| Project | `data/projects.json` via `main.py` remains default page/route authority; SQLite ProjectRecord/ProjectMember records are a verified canonical foundation but not default route authority |
+| Canvas | SQLite authority state is activated after a verified 22-payload backfill/compare. Default page/route runtime remains `data/canvases/*.json`; R4's flag-enabled isolated API/browser acceptance passed, but general cutover is incomplete |
+| Node/Edge | Dictionaries embedded in Canvas JSON; NodeRecord/EdgeRecord are views |
+| Asset | Configured asset files plus JSON library/storage/shared-folder metadata; no AssetVersion |
+| Workflow | Mutable `workflows/*.json`/configs plus Canvas archives/library items; no WorkflowVersion/Run |
+| Audit | `data/audit/canvas-node-events.jsonl` for migrated node/graph actions only; non-transactional and incomplete |
+
+Artifact, Entity, Knowledge, Approval, Handoff, and package-history authorities do
+not exist.
+
+## R3 canonical identity, authorization, and audit foundation
+
+`LegacyIdentityMapper` maps `project: "default"` to the stable default ProjectRecord
+and `owner: ""` to `local_unowned`, without creating a user identity. A non-empty
+Legacy owner maps to a stable `legacy-owner:<owner>` local actor and Editor member;
+an unknown project is reported as `project_mismatch` and skipped from automatic
+import. `AuthorizationService` currently enforces `project.read` for Owner/Editor/
+Viewer and `canvas.edit` for Owner/Editor at the canonical boundary. This is a
+local migration mapping, not global authentication or a claim that LAN mode is
+multi-user safe.
+
+Canonical mutation requires the independent positive logical revision. The Canvas
+payload update and `audit_outbox` insert use the same SQLite transaction; an audit
+insert failure rolls the Canvas change back. Existing JSONL audit remains a separate
+Legacy compatibility path until switch completion.
+
+`tools/migrate_project_canvas.py` requires explicit Legacy project and Canvas source
+paths plus a SQLite/report destination. It only backfills and compares by default;
+`--activate` is required for an authority-state switch and refuses activation when a
+source Canvas was skipped or differs. It has been tested only with temporary
+fixtures and once against the live `data/` directory: 22 Canvas payloads imported,
+0 skipped, and 0 differences. That report did not pass `--activate` and rewrote no
+Legacy source file.
+
+## Authorization and security
+
+There is no global authentication or authorization. Most Legacy routes, WebSocket,
+project/Canvas, provider administration, file/workflow, and update operations are
+available to any client that reaches the server.
+
+The transitional `/api/v1` node routes require caller-supplied `X-User-ID`, exist
+only on loopback, and use `LegacyCanvasProjectAuthorizer`: project must match; a
+non-empty owner must match the header; local wiring permits unowned Canvases via
+`allow_unowned_local=True`. This is a scoped compatibility check, not authenticated
+identity or target authorization.
+
+CORS defaults to loopback and rejects wildcards, but LAN mode remains explicitly
+unauthenticated. Secret-boundary, path-containment, media cleanup, and stale-write
+tests pass. R3 has a canonical action policy and atomic audit transaction, but
+neither is uniform across the active Legacy surface; no Legacy-wide SSRF policy or
+subprocess/tool-permission boundary exists.
+
+## Performance baseline
+
+R2 latest reran `node tools/benchmark-canvas-payload.mjs`: 9,622 bytes for 100 nodes
+(0.115 ms serialization) and 29,132 bytes for 300 nodes (0.085 ms), with
+sub-millisecond serialization. The latest browser
+evidence is `docs/benchmarks/canvas-node-shell-baseline-2026-09-04.md`: its visible
+300-node Safari NodeShell sample recorded load 152 ms, render ready 362 ms, zoom 38
+ms, pan 104 ms, and minimap 15 ms. The earlier offscreen 300-node minimap sample was
+149 ms (141 ms recheck), retained as a P2 iframe-scheduling follow-up. These are
+single local observations, not release/percentile budgets.
+
+R4 reran the deterministic payload check after enabling the SQLite compatibility
+route in an isolated local process: 9,622 bytes/0.102 ms for 100 nodes and
+29,132 bytes/0.088 ms for 300 nodes. This does not replace browser interaction
+acceptance.
+
+## Legacy monolith responsibility baseline
+
+| File | Size | Responsibilities still present | Already delegated/extracted |
+|---|---:|---|---|
+| `main.py` | 19,466 lines; 868 top-level functions; 77 classes; 165 routes | Composition plus most provider/model/secret/subprocess/generation/chat/project/Canvas/asset/workflow/update/media/queue/event and Legacy API behavior | Node router/services, records/adapters, Legacy repositories, renderer registry, JSONL audit live under `workbench/`; `main.py` wires them |
+| `static/js/canvas.js` | 16,705 lines | Classic create/render/connect/execute, provider UI, graph/save/workflow/asset/log/minimap/selection/geometry behavior | Opt-in runtime, geometry, graph/group intents, catalog/client, records, entry compatibility resolver, NodeShell, renderer host/registry/renderers, Inspector, semantic zoom, screen controls; explicitly enabled blank Output creation delegates through the restricted NodeCreationService path |
+| `static/js/smart-canvas.js` | 20,102 lines | Smart composer/create/render/connect/execute, provider/media/MiniMax, graph/save/group/minimap/selection/geometry behavior | Uses the same opt-in shared modules through adapters; Smart Group/Image/Legacy NodeShell card batches mount through `UnifiedRenderHost`; explicitly enabled blank MiniMax creation delegates through the restricted NodeCreationService path |
+
+R0 added no Workbench business responsibility to these files and removed/delegated
+none; it changed documentation only. R1 adds no Workbench business responsibility to
+these Legacy monoliths; the Codex transport is new code under `workbench/codex/`.
+R2 adds no Workbench business responsibility to them: Classic blank Output and Smart
+blank MiniMax creation, Classic/Smart port-drop and execution compatibility delegate to shared modules, Smart NodeShell batch-card
+mounting delegates to `UnifiedRenderHost`, and historical Smart-entry detection/URL
+construction delegates to the shared entry compatibility resolver.
+
+## Verification baseline
+
+- Latest R4 baseline, `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest
+  discover -s tests -q`: 206 tests passed in 1.455 seconds.
+- Python AST: `main.py`, 30 `workbench/**/*.py` files, and two migration/backup
+  tools passed (33 files total).
+- JavaScript: 42 files, including Classic, Smart, Canvas-list, and shared Canvas
+  modules, passed `node --check` using `/Users/lo/.local/node-v24.20.0/bin/node`
+  (Node v24.20.0).
+- R2 tests prove connected creation rejects a missing revision at the API boundary
+  and before node preparation, rejects zero/negative revisions, while valid
+  revisioned graph mutations still persist.
+- NodeMutationService/API tests verify the update boundary accepts only `title` and
+  `position` mutations (plus identity/revision fields) and rejects extra payload
+  fields.
+- GraphMutationService tests cover both edge directions while preserving the
+  `legacy.out -> legacy.in` port contract.
+- R2 execution-compatibility tests verify normalized completion metadata and
+  preserved Legacy errors annotated with failed Canvas/node metadata; the wrapper
+  does not select providers, models, or executors. Classic and Smart generation
+  entry tests verify their respective Legacy callbacks and fallback paths.
+- R2 browser acceptance on the local server verified the one normal list entry:
+  a Classic record opened `canvas.html`, while a historical Smart record entered
+  through that list and then reached its retained `smart-canvas.html` adapter.
+  No Canvas data or execution was mutated during this check.
+- R2 browser acceptance also loaded both adapter pages with explicit shared Canvas
+  flags (`unified_canvas`, NodeShell, both renderers, semantic zoom, and
+  screen-space controls). Classic and Smart both displayed shared NodeShell
+  ready/port controls and semantic summaries without a data mutation.
+- R1 bridge tests passed against a fake stdio peer; a live non-mutating App Server
+  `initialize`, `model/list`, and `config/read` smoke check passed with
+  `codex-cli 0.153.1`.
+
+R0 changed no product source, schema, persistence, API, or runtime behavior.

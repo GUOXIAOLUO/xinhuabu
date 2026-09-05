@@ -4,7 +4,9 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException
 
-from workbench.api.canvas_nodes import NodeCreatePayload, NodeDeletePayload, NodeUpdatePayload, create_canvas_nodes_router
+from pydantic import ValidationError
+
+from workbench.api.canvas_nodes import CreateNodeAndEdgePayload, NodeCreatePayload, NodeDeletePayload, NodeUpdatePayload, create_canvas_nodes_router
 from workbench.application.node_creation import NodeCreationPersistence
 from workbench.application.node_mutation import NodeMutationPersistence
 from workbench.domain.canvas.models import DefinitionRef, NodeRecord, Position, RendererRef, Size
@@ -78,6 +80,15 @@ class CanvasNodesApiTests(unittest.TestCase):
         self.assertEqual(response.node["schema_version"], "workbench.node/1")
         self.assertEqual(self.service.commands[0].actor_id, "user-1")
 
+    def test_connected_create_payload_requires_an_expected_revision(self):
+        for revision in (None, 0, -1):
+            with self.assertRaises(ValidationError):
+                CreateNodeAndEdgePayload(
+                    request_id="request-1", project_id="project-1", source="legacy",
+                    definition_ref={"type": "legacy", "id": "image", "version": "0"}, position={"x": 20, "y": 30},
+                    expected_revision=revision, existing_node_id="origin", edge_id="edge-1",
+                )
+
     def test_get_requires_actor_and_project_scope_parameter(self):
         response = asyncio.run(self.get_endpoint("canvas-1", "node-1", project_id="project-1", x_user_id="user-1"))
         self.assertEqual(response["node"]["id"], "node-1")
@@ -118,3 +129,7 @@ class CanvasNodesApiTests(unittest.TestCase):
                 project_id="project-1", expected_revision=3,
             ), x_user_id=""))
         self.assertEqual(missing.exception.status_code, 401)
+
+    def test_update_payload_rejects_fields_outside_title_and_position(self):
+        with self.assertRaises(ValidationError):
+            NodeUpdatePayload(project_id="project-1", expected_revision=1, config={"provider": "x"})

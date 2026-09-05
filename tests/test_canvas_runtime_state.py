@@ -8,6 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "static" / "js" / "workbench" / "canvas" / "runtime-state.js"
 GRAPH_GEOMETRY = ROOT / "static" / "js" / "workbench" / "canvas" / "graph-geometry.js"
 GRAPH_INTERACTION = ROOT / "static" / "js" / "workbench" / "canvas" / "graph-interaction.js"
+PORT_COMPATIBILITY = ROOT / "static" / "js" / "workbench" / "canvas" / "port-compatibility.js"
+EXECUTION_COMPATIBILITY = ROOT / "static" / "js" / "workbench" / "canvas" / "execution-compatibility.js"
+NODE_CLIENT = ROOT / "static" / "js" / "workbench" / "canvas" / "node-creation-client.js"
 GROUP_MEMBERSHIP = ROOT / "static" / "js" / "workbench" / "canvas" / "group-membership.js"
 VIEWPORT_RECOVERY = ROOT / "static" / "js" / "workbench" / "canvas" / "viewport-recovery.js"
 
@@ -62,6 +65,54 @@ console.log(JSON.stringify({{forward:I.edgeIntentFromPortDrop({{nodeId:'a',port:
         self.assertEqual(payload["forward"], expected)
         self.assertEqual(payload["reverse"], expected)
         self.assertIsNone(payload["invalid"])
+
+    def test_shared_port_compatibility_keeps_unknown_legacy_ports_and_rejects_declared_mismatch(self):
+        source = PORT_COMPATIBILITY.read_text(encoding="utf-8")
+        self.assertNotIn("node.type", source)
+        self.assertNotIn("document.", source)
+        result = subprocess.run(["node", "-e", f"""
+const fs=require('fs'), vm=require('vm'); const sandbox={{window:{{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(PORT_COMPATIBILITY))}, 'utf8'), sandbox);
+const C=sandbox.window.WorkbenchCanvasPortCompatibility;
+console.log(JSON.stringify({{legacy:C.isCompatible({{direction:'out'}},{{direction:'in'}}), typed:C.isCompatible({{direction:'out',dataType:'asset'}},{{direction:'in',dataType:'asset'}}), mismatch:C.isCompatible({{direction:'out',dataType:'asset'}},{{direction:'in',dataType:'text'}}), reversed:C.isCompatible({{direction:'in'}},{{direction:'out'}})}}));
+"""], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {"legacy": True, "typed": True, "mismatch": False, "reversed": False})
+
+    def test_execution_compatibility_wraps_retained_execution_without_runtime_selection(self):
+        source = EXECUTION_COMPATIBILITY.read_text(encoding="utf-8")
+        self.assertNotIn("fetch(", source)
+        self.assertNotIn("localStorage", source)
+        result = subprocess.run(["node", "-e", f"""
+const fs=require('fs'), vm=require('vm'); const sandbox={{window:{{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(EXECUTION_COMPATIBILITY))}, 'utf8'), sandbox);
+const E=sandbox.window.WorkbenchCanvasExecutionCompatibility;
+(async()=>{{
+  const completed=await E.run({{canvasKind:'classic', sourceNodeId:'node-1', execute:async()=> 'legacy-result'}});
+  let failed;
+  try {{ await E.run({{canvasKind:'smart', sourceNodeId:'node-2', execute:async()=>{{throw new Error('retained failure');}}}}); }}
+  catch(error) {{ failed={{message:error.message, metadata:error.workbenchExecutionCompatibility}}; }}
+  console.log(JSON.stringify({{completed, completedFrozen:Object.isFrozen(completed), failed}}));
+}})();
+"""], check=True, text=True, capture_output=True)
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            {key: payload["completed"][key] for key in ("status", "canvasKind", "sourceNodeId", "result")},
+            {"status": "completed", "canvasKind": "classic", "sourceNodeId": "node-1", "result": "legacy-result"},
+        )
+        self.assertTrue(payload["completedFrozen"])
+        self.assertEqual(payload["failed"]["message"], "retained failure")
+        self.assertEqual(
+            {key: payload["failed"]["metadata"][key] for key in ("status", "canvasKind", "sourceNodeId")},
+            {"status": "failed", "canvasKind": "smart", "sourceNodeId": "node-2"},
+        )
+
+    def test_connected_creation_client_requires_revision_before_network(self):
+        result = subprocess.run(["node", "-e", f"""
+const fs=require('fs'), vm=require('vm'); const sandbox={{window:{{location:{{hostname:'localhost',search:''}}}}, fetch:()=>{{throw new Error('network must not run')}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(NODE_CLIENT))}, 'utf8'), sandbox);
+try {{ sandbox.window.WorkbenchNodeClient.createNodeAndEdge('canvas', {{}}, 'actor'); }} catch (error) {{ console.log(error.message); }}
+"""], check=True, text=True, capture_output=True)
+        self.assertIn("positive expected_revision", result.stdout)
 
     def test_shared_graph_geometry_has_symmetric_port_anchors_and_no_dom_dependency(self):
         source = GRAPH_GEOMETRY.read_text(encoding="utf-8")

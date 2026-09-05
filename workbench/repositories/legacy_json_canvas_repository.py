@@ -52,6 +52,51 @@ class LegacyJsonCanvasRepository(CanvasRepository):
                 raise StaleCanvasRevisionError(current)
             return self._save_unlocked(canvas)
 
+    def save_metadata(self, canvas: dict[str, Any]) -> dict[str, Any]:
+        canvas_id = str(canvas.get("id") or "")
+        path = self.path_for(canvas_id)
+        with self._lock:
+            if not path.exists():
+                raise CanvasNotFoundError("canvas not found")
+            with path.open("w", encoding="utf-8") as handle:
+                json.dump(canvas, handle, ensure_ascii=False, indent=2)
+        return canvas
+
+    def list_payloads(self, *, include_deleted: bool = False) -> list[dict[str, Any]]:
+        return self.list_payloads_with_diagnostics(include_deleted=include_deleted)[0]
+
+    def list_payloads_with_diagnostics(self, *, include_deleted: bool = False) -> tuple[list[dict[str, Any]], bool]:
+        if not self._directory.exists():
+            return [], True
+        payloads = []
+        unreadable = False
+        for path in sorted(self._directory.glob("*.json")):
+            try:
+                with path.open(encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            except Exception:
+                unreadable = True
+                continue
+            if include_deleted or not payload.get("deleted_at"):
+                payloads.append(payload)
+        return payloads, unreadable
+
+    def purge_expired_deleted(self, *, before_ms: int) -> int:
+        removed = 0
+        for payload in self.list_payloads(include_deleted=True):
+            if int(payload.get("deleted_at") or 0) and int(payload["deleted_at"]) < before_ms:
+                removed += int(self.purge(str(payload.get("id") or "")))
+        return removed
+
+    def reassign_project(self, *, source_project_id: str, target_project_id: str) -> int:
+        moved = 0
+        for payload in self.list_payloads(include_deleted=True):
+            if str(payload.get("project") or "") == source_project_id:
+                payload["project"] = target_project_id
+                self.save_metadata(payload)
+                moved += 1
+        return moved
+
     def purge(self, canvas_id: str) -> bool:
         path = self.path_for(canvas_id)
         with self._lock:

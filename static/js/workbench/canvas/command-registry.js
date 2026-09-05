@@ -10,7 +10,7 @@
         ['canvas.create.prompt', 'prompt', ['classic', 'smart'], 20, ['classic', 'smart'], ['smart']],
         ['canvas.create.loop', 'loop', ['classic', 'smart'], 30, ['classic', 'smart'], ['smart']],
         ['canvas.create.group', 'group', ['classic', 'smart'], 40, ['classic', 'smart'], ['classic', 'smart']],
-        ['canvas.create.minimax', 'minimax', ['classic', 'smart'], 50, [], ['smart']],
+        ['canvas.create.minimax', 'minimax', ['classic', 'smart'], 50, ['smart'], ['smart']],
         ['canvas.create.llm', 'llm', ['classic'], 60, [], []],
         ['canvas.create.generator', 'generator', ['classic'], 70, [], []],
         ['canvas.create.midjourney', 'midjourney', ['classic'], 80, [], []],
@@ -19,7 +19,7 @@
         ['canvas.create.rh', 'rh', ['classic'], 110, [], []],
         ['canvas.create.comfy', 'comfy', ['classic'], 120, [], []],
         ['canvas.create.ltx-director', 'ltxDirector', ['classic'], 130, [], []],
-        ['canvas.create.output', 'output', ['classic'], 140, [], []],
+        ['canvas.create.output', 'output', ['classic'], 140, ['classic'], []],
     ].map(([id, createType, canvasKinds, order, versionedBlankCanvasKinds, versionedConnectedCanvasKinds]) => ({
         id,
         definition_ref: {id: createType, type: 'legacy-node', version: '0'},

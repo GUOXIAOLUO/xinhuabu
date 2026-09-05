@@ -88,6 +88,20 @@ class CanvasNodesRuntimeTests(unittest.TestCase):
             "group", 300, 220, [],
         ))
 
+    def test_registered_local_route_creates_empty_classic_output(self):
+        canvas = main.new_canvas("classic output API test", kind="classic", project="default")
+        create = self.endpoint("/api/v1/canvases/{canvas_id}/nodes", "POST")
+        response = asyncio.run(create(canvas["id"], NodeCreatePayload(
+            request_id="runtime-output-1", project_id="default", source="context_menu",
+            definition_ref={"type": "legacy", "id": "output", "version": "0"},
+            position={"x": 12, "y": 24}, expected_revision=canvas["updated_at"], title="Output",
+        ), x_user_id="local-user"))
+        saved = main.load_canvas(canvas["id"])
+        self.assertTrue(response.created)
+        self.assertEqual((saved["nodes"][0]["type"], saved["nodes"][0]["images"], saved["nodes"][0]["w"], saved["nodes"][0]["h"]), (
+            "output", [], 460, 180,
+        ))
+
     def test_registered_routes_update_and_delete_legacy_image(self):
         canvas = main.new_canvas("node mutation API test", kind="classic", project="default")
         create = self.endpoint("/api/v1/canvases/{canvas_id}/nodes", "POST")
@@ -181,3 +195,16 @@ class CanvasNodesRuntimeTests(unittest.TestCase):
         saved = main.load_canvas(canvas["id"])
         self.assertEqual(saved["nodes"][-1]["type"], "smart-minimax")
         self.assertFalse(saved["nodes"][-1]["running"])
+
+    def test_registered_local_route_creates_empty_smart_minimax(self):
+        canvas = main.new_canvas("smart minimax API test", kind="smart", project="default")
+        create = self.endpoint("/api/v1/canvases/{canvas_id}/nodes", "POST")
+        response = asyncio.run(create(canvas["id"], NodeCreatePayload(
+            request_id="runtime-smart-minimax-1", project_id="default", source="context_menu",
+            definition_ref={"type": "legacy", "id": "smart-minimax", "version": "0"},
+            position={"x": 12, "y": 24}, expected_revision=canvas["updated_at"], title="MiniMax H3",
+        ), x_user_id="local-user"))
+        saved = main.load_canvas(canvas["id"])
+        self.assertTrue(response.created)
+        self.assertEqual(saved["nodes"][0]["type"], "smart-minimax")
+        self.assertFalse(saved["nodes"][0]["running"])
