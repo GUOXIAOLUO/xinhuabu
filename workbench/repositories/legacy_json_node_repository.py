@@ -54,18 +54,23 @@ class LegacyJsonNodeCreationRepository:
             return False
 
         def append(canvas: dict[str, Any]) -> None:
+            definition_id = node.definition_ref.id
+            is_smart_image = definition_id == "image" and canvas.get("kind") == "smart"
             payload: dict[str, Any] = {
                 "id": node.id,
-                "type": node.definition_ref.id,
+                "type": "smart-image" if is_smart_image else definition_id,
                 "x": node.position.x,
                 "y": node.position.y,
                 "w": node.size.width,
                 "h": node.size.height,
                 self.REQUEST_METADATA_KEY: request_id,
             }
-            if node.definition_ref.id == "image":
-                payload["name"] = node.title
-            elif node.definition_ref.id == "output":
+            if definition_id == "image":
+                if is_smart_image:
+                    payload.update({"title": node.title, "images": []})
+                else:
+                    payload["name"] = node.title
+            elif definition_id == "output":
                 payload["images"] = []
             elif node.definition_ref.id == "prompt":
                 payload["text"] = str(node.config.get("text") or "")
@@ -124,7 +129,7 @@ class LegacyJsonNodeLookup:
 
 
 class LegacyJsonNodeMutationRepository:
-    """Update or delete only the transitional Legacy Image node shape."""
+    """Update or delete transitional Image and safe Classic/Smart simple node shapes."""
 
     def __init__(self, repository: LegacyJsonCanvasRepository):
         self._repository = repository
@@ -134,9 +139,12 @@ class LegacyJsonNodeMutationRepository:
 
         def mutation(canvas: dict[str, Any]) -> None:
             nonlocal updated
-            updated = self._find_image(canvas, command.node_id)
+            updated = self._find_mutable_node(canvas, command.node_id)
             if command.title is not None:
-                updated["name"] = command.title
+                if updated.get("type") == "smart-image":
+                    updated["title"] = command.title
+                else:
+                    updated["name"] = command.title
             if command.position is not None:
                 updated["x"] = command.position.x
                 updated["y"] = command.position.y
@@ -153,7 +161,7 @@ class LegacyJsonNodeMutationRepository:
 
     def delete_node(self, command: NodeDeleteCommand) -> NodeMutationPersistence:
         def mutation(canvas: dict[str, Any]) -> None:
-            self._find_image(canvas, command.node_id)
+            self._find_mutable_node(canvas, command.node_id)
             canvas["nodes"] = [
                 node for node in canvas.get("nodes") or []
                 if not isinstance(node, dict) or node.get("id") != command.node_id
@@ -170,9 +178,9 @@ class LegacyJsonNodeMutationRepository:
         return NodeMutationPersistence(canvas_revision=int(saved.get("updated_at") or 1))
 
     @staticmethod
-    def _find_image(canvas: dict[str, Any], node_id: str) -> dict[str, Any]:
+    def _find_mutable_node(canvas: dict[str, Any], node_id: str) -> dict[str, Any]:
         node = next((item for item in canvas.get("nodes") or [] if isinstance(item, dict) and item.get("id") == node_id), None)
-        if node is None or node.get("type") != "image":
+        if node is None or node.get("type") not in {"image", "smart-image", "prompt", "loop", "output", "group", "smart-group", "smart-loop", "smart-prompt"}:
             raise LookupError("node not found")
         return node
 
@@ -185,8 +193,8 @@ class LegacyJsonGraphMutationRepository:
 
     def create_node_and_edge(self, command: CreateNodeAndEdgeCommand) -> GraphMutationPersistence:
         definition_id = command.node.definition_ref.id
-        if command.node.definition_ref.type != "legacy" or definition_id not in {"image", "group", "smart-group", "smart-prompt", "smart-loop", "smart-minimax"}:
-            raise ValueError("this Legacy graph repository only supports approved Smart image, group, prompt, loop, and MiniMax definitions")
+        if command.node.definition_ref.type != "legacy" or definition_id not in {"image", "prompt", "loop", "group", "smart-group", "smart-prompt", "smart-loop", "smart-minimax"}:
+            raise ValueError("this Legacy graph repository only supports approved image, prompt, loop, group, and MiniMax definitions")
 
         def mutation(canvas: dict[str, Any]) -> None:
             node_ids = {item.get("id") for item in canvas.get("nodes") or [] if isinstance(item, dict)}
@@ -202,7 +210,19 @@ class LegacyJsonGraphMutationRepository:
             }
             if definition_id == "image":
                 payload["images"] = []
-                payload["name"] = command.node.title
+                if legacy_type == "smart-image":
+                    payload.pop("name", None)
+                else:
+                    payload["name"] = command.node.title
+            elif definition_id == "prompt":
+                payload["text"] = str(command.node.config.get("text") or "")
+            elif definition_id == "loop":
+                payload.update({
+                    "count": int(command.node.config.get("count") or 3), "mode": "serial",
+                    "showPrompt": False, "imageInput": False, "videoInput": False,
+                    "loopStart": 1, "imageBatchSize": 1, "videoBatchSize": 1,
+                    "variablePrompt": "", "fixedPrompt": "",
+                })
             elif definition_id == "smart-prompt":
                 for key, default in {
                     "text": "", "promptResult": "", "promptResultOutdated": False, "promptSeparator": ";", "promptSplitEnabled": False,
@@ -225,6 +245,10 @@ class LegacyJsonGraphMutationRepository:
             canvas.setdefault("connections", []).append({
                 "id": command.edge.id, "from": command.edge.from_.node_id, "to": command.edge.to.node_id, "kind": "input",
             })
+            target = next((item for item in canvas["nodes"] if isinstance(item, dict) and item.get("id") == command.edge.to.node_id), None)
+            if target is None:  # Defensive: GraphMutationService already validates this relationship.
+                raise LookupError("edge target not found")
+            target["inputNodeIds"] = list(dict.fromkeys([*(target.get("inputNodeIds") or []), command.edge.from_.node_id]))
 
         saved = self._repository.mutate_if_current(
             command.canvas_id, expected_updated_at=command.expected_revision, mutation=mutation,

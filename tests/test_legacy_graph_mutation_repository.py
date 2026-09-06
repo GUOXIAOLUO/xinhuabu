@@ -26,7 +26,20 @@ class LegacyJsonGraphMutationRepositoryTests(unittest.TestCase):
             saved = repository.load("canvas")
             self.assertGreater(result.canvas_revision, revision)
             self.assertEqual(saved["nodes"][-1]["items"], [])
+            self.assertEqual(saved["nodes"][-1]["inputNodeIds"], ["origin"])
             self.assertEqual(saved["connections"][-1], {"id": "edge", "from": "origin", "to": "group", "kind": "input"})
+
+    def test_creates_classic_image_and_input_relation_under_one_canvas_revision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repository = LegacyJsonCanvasRepository(Path(directory), clock_ms=lambda: 100, lock=Lock())
+            repository.save({"id": "canvas", "project": "project", "nodes": [{"id": "origin", "type": "prompt"}], "connections": [], "updated_at": 99})
+            revision = repository.load("canvas")["updated_at"]
+            timestamp = datetime(2026, 9, 2, tzinfo=UTC)
+            image = NodeRecord(id="image", project_id="project", canvas_id="canvas", kind="asset", definition_ref=LegacyDefinitionRegistry.IMAGE, renderer=RendererRef(id="legacy", version="1"), state=NodeState.READY, title="Image", position=Position(x=10, y=20), size=Size(width=280, height=190), ports=PortSet(), created_by="actor", created_at=timestamp, updated_at=timestamp)
+            edge = EdgeRecord(id="edge", canvas_id="canvas", **{"from": {"node_id": "origin", "port_id": "legacy.out"}, "to": {"node_id": "image", "port_id": "legacy.in"}})
+            LegacyJsonGraphMutationRepository(repository).create_node_and_edge(CreateNodeAndEdgeCommand(actor_id="actor", project_id="project", canvas_id="canvas", expected_revision=revision, node=image, edge=edge))
+            saved = repository.load("canvas")
+            self.assertEqual((saved["nodes"][-1]["type"], saved["nodes"][-1]["name"], saved["nodes"][-1]["inputNodeIds"]), ("image", "Image", ["origin"]))
 
     def test_creates_smart_group_and_edge_under_one_canvas_revision(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -40,6 +53,7 @@ class LegacyJsonGraphMutationRepositoryTests(unittest.TestCase):
             saved = repository.load("canvas")
             self.assertEqual(saved["nodes"][-1]["type"], "smart-group")
             self.assertEqual(saved["nodes"][-1]["title"], "智能分组")
+            self.assertEqual(saved["nodes"][-1]["inputNodeIds"], ["origin"])
             self.assertEqual(saved["connections"][-1]["kind"], "input")
 
     def test_creates_smart_prompt_with_its_safe_config_and_edge(self):

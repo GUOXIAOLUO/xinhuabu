@@ -57,6 +57,26 @@ Semantic zoom is default-on with `semantic_zoom=0` retained as its bounded U7
 rollback control.
 Smart screen-space controls are default-on with `screen_space_controls=0`
 retained as their bounded U7 rollback control.
+Classic and Smart renderer-admission evaluation now runs through the shared
+`RendererAdmission` boundary. Classic retains its explicit Legacy type policy;
+Smart retains its non-image/non-Group policy, while renderer selection remains
+owned by the Unified host.
+Shared media playback-state capture/restore is now covered as a transport- and
+persistence-neutral contract; adapter player binding and fallback policy remain
+unchanged.
+Classic standalone blank Image deletion now likewise uses the existing loopback
+`NodeMutationService` route on the default path. Content-bearing Images,
+group-linked Images, and all other node deletion contracts remain bounded adapter
+compatibility until their graph/media parity is characterized.
+The same bounded mutation path now also covers a standalone blank Smart Prompt:
+only the durable `smart-prompt` shape without text/result, active LLM settings,
+attachments, input references, links, or group membership may update its position
+or delete through `NodeMutationService`; every richer Prompt remains adapter-owned
+compatibility.
+The same narrow Classic node class now commits a single non-Alt, non-grouped drag
+position through `NodeMutationService`; a rejected or stale write restores its
+prior visual position instead of issuing a raw Canvas save. Rich move/resize and
+group/media behavior remain adapter-owned compatibility.
 The historical Smart handoff now preserves query parameters while replacing the
 Canvas id and cache version, so the explicit all-zero rollback is effective from
 the normal Canvas URL as well as the retained adapter URL.
@@ -229,7 +249,7 @@ diagnostic exists.
 | U1 | complete | Shared CanvasRuntime/recovery/coordinates used by both adapters behind an off-by-default flag; tests pass |
 | U2 | complete | Shared graph geometry, port-drop, port compatibility, group membership, and commands are used by both adapters; Smart hover and final drop use the same typed compatibility contract. Full interaction ownership remains Legacy pending U7. |
 | U3 | complete | NodeShell, registries/host, renderers, Inspector, semantic zoom, and screen controls are shared opt-in adapters; Smart Group/Image/Legacy batches mount through UnifiedRenderHost, whose behavioral test verifies ordered frozen results and invalid-input rejection. Render paths remain gated pending U7. |
-| U4 | complete | Shared catalog and restricted versioned creation/graph APIs are used by Classic blank Image/Prompt/Loop/Group/Output and Smart blank Image/Prompt/Loop/Group/MiniMax menus when explicitly enabled on loopback. Unmigrated page-owned constructors/imports remain compatibility paths. |
+| U4 | complete | Shared catalog and restricted versioned creation/graph APIs are used by Classic blank Image/Prompt/Loop/Group/Output and Smart blank Image/Prompt/Loop/Group/MiniMax menus by default on loopback; `versioned_nodes=0` is the bounded U7 rollback. Unmigrated page-owned constructors/imports remain compatibility paths. |
 | U5 | complete | Shared result-placement intent and narrow Classic/Smart compatibility wrapper preserve Legacy execution. Behavioral tests cover frozen completion metadata, retained-error failure metadata, and both page-entry fallbacks. No unified executor runtime exists. |
 | U6 | complete | Canvas list exposes one normal creation choice, hides source-kind labels, and opens one normal `canvas.html` entry; a side-effect-free resolver scopes historical Smart handoff to its retained compatibility adapter. |
 | U7 | in_progress | SQLite is the default canonical page/route persistence after validated authority activation; retained Classic/Smart adapters now use one neutral CanvasRecord load/save/metadata client, version-poll coordinator, transport-neutral update-message filter, workflow archive transport/JSON-export/import-normalization client, side-effect-free Canvas Graph Fragment for selected-subgraph (including clipboard copy)/import-graph-materialization (including center-anchored clipboard paste)/graph-record removal, generic HTTP error parser, shared text-copy fallback/clipboard verification, and media original-URL/preview routing, callback-driven media-reference filtering, MIME/extension media-kind classification (also used by MediaRenderer), native-video event isolation, preview-failure fallback binding, native-media playback-state preservation, high-resolution candidate collection, single-image async decode preloading, pure intrinsic-media/thumbnail sizing, and pure media-grid fitting while preserving their polling, merge, archive format, node serialization/order, page-specific import normalization/selection UI, media display/proxy rules, Classic FLV classification/image limits, Smart image-disguised-as-video exclusion, player activation, render lifecycle and node/stage transplantation policy, cache/scope/delayed application policy, Smart default/audio card treatment and group/grid placement and overflow policy, download, provider, execution, and UI behavior. Canvas-list project memory and encoded list-URL construction also use the same side-effect-free entry boundary. Shared state, NodeShell base, MediaRenderer, LegacyRenderer, semantic zoom, and Smart screen-space controls are default-on with explicit `unified_canvas=0` / `node_shell=0` / `legacy_renderer=0` / `media_renderer=0` / `semantic_zoom=0` / `screen_space_controls=0` rollback. Canvas list and asset manager use the normal entry; the asset manager presents one neutral `画布` category, while source guards confine Smart URLs and handoff decisions to the compatibility module. Default-path browser reads and the all-zero rollback both passed for Classic and historical Smart, and the Smart handoff preserves the rollback query. Isolated browser creation, restart, stale-conflict, and lossless rollback export are tested. Duplicate runtime/page removal and final flag removal remain pending. |
@@ -664,8 +684,8 @@ follow-up. All are single local samples, not percentile/release commitments.
   semantic zoom, and screen controls live in `static/js/workbench/canvas/`.
 - R4 added Workbench business responsibility: no.
 - R2 responsibilities removed/delegated: Classic blank Output creation now delegates
-  to the restricted NodeCreationService route when the explicitly enabled loopback
-  compatibility path is active; Classic port-drop acceptance delegates to
+  to the restricted NodeCreationService route by default on loopback; `versioned_nodes=0`
+  retains the bounded U7 compatibility fallback. Classic port-drop acceptance delegates to
   shared `WorkbenchCanvasPortCompatibility`; its generic generation entry delegates
   through `WorkbenchCanvasExecutionCompatibility`; historical Smart-entry detection
   and URL construction delegate to `WorkbenchCanvasEntryCompatibility`.
@@ -678,11 +698,139 @@ follow-up. All are single local samples, not percentile/release commitments.
 - Already delegated: consumes the same opt-in shared Canvas modules as Classic.
 - R4 added Workbench business responsibility: no.
 - R2 responsibilities removed/delegated: Smart blank MiniMax creation delegates to
-  the restricted NodeCreationService route when the explicitly enabled loopback
-  compatibility path is active; Smart port-drop hover and acceptance
+  the restricted NodeCreationService route by default on loopback; `versioned_nodes=0`
+  retains the bounded U7 compatibility fallback. Smart port-drop hover and acceptance
   delegate to shared `WorkbenchCanvasPortCompatibility`; its primary generation
   entry delegates through `WorkbenchCanvasExecutionCompatibility`; Smart Group/Image/Legacy
   NodeShell card batches delegate to `UnifiedRenderHost.mountAdapterCards`.
+- R4 narrowing: an idle, media-free, ungrouped Smart Image without history or
+  dependent input references now deletes through `NodeMutationService`; rejected
+  or stale writes do not fall through to raw Canvas save. Smart media clearing,
+  group/history and dependent-node deletion remain adapter-owned compatibility.
+- R4 narrowing: the same Smart Image class commits a single non-Alt/non-Ctrl,
+  non-thumbnail drag position through `NodeMutationService`; stale or rejected
+  writes restore its previous position. Rich move, group/media and resize
+  behavior remain adapter-owned compatibility.
+- R4 narrowing: the Legacy persistence adapter now writes a service-created
+  blank Image as durable `smart-image` data on Smart Canvases, with Smart title
+  and empty media fields. This removes the normal creation path's dependence on
+  a front-end-only type projection; media and rich creation remain compatibility.
+- R4 narrowing: supported Smart connected creation now persists its new node,
+  edge and target input relationship in the GraphMutationService transaction.
+  The successful local projection does not schedule a raw Canvas save; ordinary
+  connection interaction and unsupported paths remain adapter-owned compatibility.
+- R4 narrowing: supported Classic connected blank-Image creation likewise uses
+  GraphMutationService for the new node, edge and target input relationship;
+  unsupported connected creation remains adapter-owned compatibility.
+- R4 narrowing: the same atomic GraphMutationService path now covers Classic
+  connected blank Prompt and default Loop creation. The page only projects the
+  committed node/edge and performs its retained compatibility refresh; provider,
+  execution, and configured-node creation remain adapter-owned compatibility.
+- R4 interaction narrowing: both adapters now delegate default-path viewport
+  pan-session origin/delta/threshold calculation to CanvasRuntime while retaining
+  their DOM transform and persistence shells. The explicit `unified_canvas=0`
+  rollback retains the prior page-local calculation and each adapter's original
+  movement metric.
+- R4 interaction narrowing: both adapters now delegate default-path wheel-scale
+  calculation to CanvasRuntime, preserving Classic's step factors and Smart's
+  delta-clamped exponential bounds. Their DOM/minimap/persistence shells and
+  the `unified_canvas=0` page-local formulas remain adapter-owned compatibility.
+- R4 interaction narrowing: both adapters now delegate default-path minimap
+  pointer projection and world-point centering to CanvasRuntime and its viewport
+  command. Their minimap DOM, event binding and persistence shells, along with
+  the `unified_canvas=0` page-local formulas, remain adapter-owned compatibility.
+- R4 interaction narrowing: both adapters now commit default-path fitted and
+  recovered viewports through CanvasRuntime. Their fitting inputs/fallbacks,
+  Smart recovery eligibility, DOM application and persistence shells remain
+  adapter-owned compatibility, with direct assignment retained for
+  `unified_canvas=0`.
+- R4 interaction narrowing: both adapters now commit default-path zoom-preview
+  exits, including readable node focus, through CanvasRuntime. Preview mode,
+  adapter scale rules, DOM application and persistence shells remain
+  adapter-owned compatibility, with direct assignment retained for
+  `unified_canvas=0`.
+- R4 interaction narrowing: Smart media-thumbnail single selection and preview
+  selection now commit node selection through CanvasRuntime. Media focal-item,
+  preview, Composer and video behavior remain Smart adapter-owned, with direct
+  selection state retained for `unified_canvas=0`.
+- R4 interaction narrowing: Smart's node upload entry now commits its target
+  selection through CanvasRuntime before opening the existing file picker.
+  Upload target, picker, media focal state and Composer behavior remain adapter
+  owned, with direct selection state retained for `unified_canvas=0`.
+- R4 interaction narrowing: Smart's group right-click menu now commits its
+  target selection through CanvasRuntime before opening the existing group menu.
+  Group, menu and creation behavior remain adapter owned, with direct selection
+  state retained for `unified_canvas=0`.
+- R4 creation narrowing: Classic and Smart default blank-Image menu creation
+  now commits the service result through the shared creation client, which
+  appends the projected node, records undo and applies the authoritative Canvas
+  revision. Adapter-specific node shape, Smart selection and render feedback,
+  plus unsupported/group-member creation, remain compatibility-owned.
+- R4 creation narrowing: Classic and Smart default blank-Prompt menu creation
+  now uses that same shared success-result commit. Prompt card shape, Smart
+  selection/render feedback, connected/group-member creation and unsupported
+  paths remain adapter-owned compatibility.
+- R4 creation narrowing: Classic and Smart default blank-Loop menu creation
+  now also uses the shared success-result commit. Loop card shape, Smart
+  selection/render feedback, connected/group-member creation and unsupported
+  paths remain adapter-owned compatibility.
+- R4 creation narrowing: Classic and Smart default blank-Group menu creation
+  now also uses the shared success-result commit. Group-member editing,
+  connected creation, media behavior, card shape and Smart selection/render
+  feedback remain adapter-owned compatibility.
+- R4 creation narrowing: Classic default blank-Output menu creation now uses
+  the shared success-result commit. Output card shape/render feedback and
+  connected or unsupported creation remain adapter-owned compatibility.
+- R4 creation narrowing: Smart default MiniMax menu creation now uses the
+  shared success-result commit after its existing adapter-owned timeline-segment
+  initialization. MiniMax media, timeline and execution interaction remain
+  adapter-owned compatibility.
+- R4 creation narrowing: Classic connected Group/Image and Smart connected
+  Group/Prompt/Loop/Image/MiniMax now commit their atomic graph result through
+  the shared creation client. Node/edge/undo/revision/selection and generic
+  input-relation update are shared; adapter-owned card projection, Classic
+  post-connection sync and Smart product feedback remain compatibility.
+- R4 creation narrowing: Classic and Smart now delegate DataTransfer directory
+  traversal and supported-file filtering to the shared media-drop runtime.
+  Their upload endpoints, media handling, target selection, group layout and
+  Canvas-save lifecycle remain adapter-owned compatibility.
+- R4 creation narrowing: that shared media-drop runtime now also resolves the
+  common file/directory/local-path/remote-URL payload precedence. Classic keeps
+  its existing directory-fallback eligibility; upload API, media policy, target
+  selection, group layout and Canvas-save lifecycle remain adapter-owned.
+- R4 creation narrowing: the shared media-drop runtime now owns the common
+  `/api/ai/upload` multipart transport and response file-list extraction.
+  Classic retains its JSON failure semantics; Smart retains named multipart
+  files, readable errors and media-kind projection. Result materialization,
+  target selection, group layout and Canvas save remain adapter-owned.
+- R4 mutation narrowing: a Classic Prompt with empty text, no links and no
+  group membership now updates position or deletes through NodeMutationService.
+  The repository accepts this durable Prompt shape; content-bearing, connected
+  and grouped Prompts remain adapter-owned compatibility.
+- R4 mutation narrowing: a Classic Loop only when it retains the default
+  serial/count/start/batch configuration with no prompt/media input, links or
+  group membership now updates position or deletes through NodeMutationService.
+  The repository accepts this durable Loop shape; configured, connected and
+  grouped Loops remain adapter-owned compatibility.
+- R4 mutation narrowing: a Classic Output only when it has no images, pending
+  tasks, comparison state, links or group membership now updates position or
+  deletes through NodeMutationService. The repository accepts this durable
+  Output shape; output clearing, execution results, configured, connected and
+  grouped Outputs remain adapter-owned compatibility.
+- R4 mutation narrowing: a Classic Group only when it has no members, links or
+  nesting membership now updates position or deletes through NodeMutationService.
+  The repository accepts this durable Group shape; member movement, membership
+  changes, resize and graph behavior remain adapter-owned compatibility.
+- R4 mutation narrowing: a Smart Group only when it has no members, media,
+  input references, links or nesting membership now updates position or deletes
+  through NodeMutationService. The repository accepts this durable Smart Group
+  shape; Smart group media, history, membership, resize and Composer behavior
+  remain adapter-owned compatibility.
+- R4 mutation narrowing: a Smart Loop only when it is single-round serial with
+  no prompt/image input, variable prompt, input references, links or group
+  membership now updates position or deletes through NodeMutationService.
+  Workflow, connected, grouped and configured Smart Loops remain adapter-owned
+  compatibility.
 
 ### U7 duplicate-runtime exit inventory
 

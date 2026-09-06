@@ -78,6 +78,19 @@ class LegacyNodeAdaptersTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertNotIn("config", events[0])
 
+    def test_creates_a_smart_image_in_its_durable_smart_shape(self):
+        self.canvas_repository.save({
+            "id": "smart-canvas-1", "project": "project-1", "owner": "user-1", "kind": "smart",
+            "nodes": [], "connections": [], "updated_at": 100,
+        })
+        result = self.service.create(self.command(
+            canvas_id="smart-canvas-1", request_id="smart-image-request", expected_revision=101,
+        ))
+        node = self.canvas_repository.load("smart-canvas-1")["nodes"][0]
+        self.assertTrue(result.created)
+        self.assertEqual((node["type"], node["title"], node["images"]), ("smart-image", "Image", []))
+        self.assertNotIn("name", node)
+
     def test_lookup_enforces_project_and_owner_scope(self):
         self.service.create(self.command())
         lookup = LegacyJsonNodeLookup(self.canvas_repository, self.authorizer)
@@ -190,3 +203,131 @@ class LegacyNodeAdaptersTests(unittest.TestCase):
         self.assertEqual(canvas["connections"], [])
         events = [json.loads(line) for line in self.audit_path.read_text(encoding="utf-8").splitlines()]
         self.assertEqual([event["event"] for event in events], ["canvas.node.created", "canvas.node.updated", "canvas.node.deleted"])
+
+    def test_update_and_delete_smart_image_preserves_its_smart_title_shape(self):
+        before = self.canvas_repository.load("canvas-1")
+        self.canvas_repository.mutate_if_current("canvas-1", expected_updated_at=before["updated_at"], mutation=lambda canvas: canvas.update({
+            "nodes": [{"id": "smart-image-1", "type": "smart-image", "title": "导入图片", "images": [], "x": 20, "y": 30}],
+            "connections": [{"from": "smart-image-1", "to": "other"}],
+        }))
+        revision = self.canvas_repository.load("canvas-1")["updated_at"]
+        updated = self.mutations.update(NodeUpdateCommand(
+            actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="smart-image-1",
+            expected_revision=revision, title="空白图片", position=Position(x=44, y=55),
+        ))
+        stored = self.canvas_repository.load("canvas-1")["nodes"][0]
+        self.assertEqual((updated.node.title, stored["title"], stored["x"], stored["y"]), ("空白图片", "空白图片", 44, 55))
+        self.assertNotIn("name", stored)
+        self.mutations.delete(NodeDeleteCommand(
+            actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="smart-image-1",
+            expected_revision=updated.canvas_revision,
+        ))
+        canvas = self.canvas_repository.load("canvas-1")
+        self.assertEqual(canvas["nodes"], [])
+        self.assertEqual(canvas["connections"], [])
+
+    def test_update_and_delete_empty_classic_prompt_preserves_its_prompt_shape(self):
+        before = self.canvas_repository.load("canvas-1")
+        self.canvas_repository.mutate_if_current("canvas-1", expected_updated_at=before["updated_at"], mutation=lambda canvas: canvas.update({
+            "nodes": [{"id": "prompt-1", "type": "prompt", "text": "", "x": 20, "y": 30}],
+            "connections": [],
+        }))
+        revision = self.canvas_repository.load("canvas-1")["updated_at"]
+        updated = self.mutations.update(NodeUpdateCommand(
+            actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="prompt-1",
+            expected_revision=revision, position=Position(x=44, y=55),
+        ))
+        stored = self.canvas_repository.load("canvas-1")["nodes"][0]
+        self.assertEqual((stored["type"], stored["text"], stored["x"], stored["y"]), ("prompt", "", 44, 55))
+        self.mutations.delete(NodeDeleteCommand(
+            actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="prompt-1",
+            expected_revision=updated.canvas_revision,
+        ))
+        canvas = self.canvas_repository.load("canvas-1")
+        self.assertEqual(canvas["nodes"], [])
+        self.assertEqual(canvas["connections"], [])
+
+    def test_update_and_delete_default_classic_loop_preserves_its_loop_shape(self):
+        before = self.canvas_repository.load("canvas-1")
+        self.canvas_repository.mutate_if_current("canvas-1", expected_updated_at=before["updated_at"], mutation=lambda canvas: canvas.update({
+            "nodes": [{"id": "loop-1", "type": "loop", "count": 3, "mode": "serial", "showPrompt": False, "imageInput": False, "videoInput": False, "loopStart": 1, "imageBatchSize": 1, "videoBatchSize": 1, "variablePrompt": "", "fixedPrompt": "", "x": 20, "y": 30}],
+            "connections": [],
+        }))
+        revision = self.canvas_repository.load("canvas-1")["updated_at"]
+        updated = self.mutations.update(NodeUpdateCommand(
+            actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="loop-1",
+            expected_revision=revision, position=Position(x=44, y=55),
+        ))
+        stored = self.canvas_repository.load("canvas-1")["nodes"][0]
+        self.assertEqual((stored["type"], stored["count"], stored["mode"], stored["x"], stored["y"]), ("loop", 3, "serial", 44, 55))
+        self.mutations.delete(NodeDeleteCommand(
+            actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="loop-1",
+            expected_revision=updated.canvas_revision,
+        ))
+        canvas = self.canvas_repository.load("canvas-1")
+        self.assertEqual(canvas["nodes"], [])
+        self.assertEqual(canvas["connections"], [])
+
+    def test_update_and_delete_empty_classic_output_preserves_its_output_shape(self):
+        before = self.canvas_repository.load("canvas-1")
+        self.canvas_repository.mutate_if_current("canvas-1", expected_updated_at=before["updated_at"], mutation=lambda canvas: canvas.update({
+            "nodes": [{"id": "output-1", "type": "output", "images": [], "x": 20, "y": 30}],
+            "connections": [],
+        }))
+        revision = self.canvas_repository.load("canvas-1")["updated_at"]
+        updated = self.mutations.update(NodeUpdateCommand(
+            actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="output-1",
+            expected_revision=revision, position=Position(x=44, y=55),
+        ))
+        stored = self.canvas_repository.load("canvas-1")["nodes"][0]
+        self.assertEqual((stored["type"], stored["images"], stored["x"], stored["y"]), ("output", [], 44, 55))
+        self.mutations.delete(NodeDeleteCommand(
+            actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="output-1",
+            expected_revision=updated.canvas_revision,
+        ))
+        canvas = self.canvas_repository.load("canvas-1")
+        self.assertEqual(canvas["nodes"], [])
+        self.assertEqual(canvas["connections"], [])
+
+    def test_update_and_delete_empty_classic_group_preserves_its_group_shape(self):
+        before = self.canvas_repository.load("canvas-1")
+        self.canvas_repository.mutate_if_current("canvas-1", expected_updated_at=before["updated_at"], mutation=lambda canvas: canvas.update({
+            "nodes": [{"id": "group-1", "type": "group", "items": [], "w": 300, "h": 220, "x": 20, "y": 30}],
+            "connections": [],
+        }))
+        revision = self.canvas_repository.load("canvas-1")["updated_at"]
+        updated = self.mutations.update(NodeUpdateCommand(
+            actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="group-1",
+            expected_revision=revision, position=Position(x=44, y=55),
+        ))
+        stored = self.canvas_repository.load("canvas-1")["nodes"][0]
+        self.assertEqual((stored["type"], stored["items"], stored["w"], stored["h"], stored["x"], stored["y"]), ("group", [], 300, 220, 44, 55))
+        self.mutations.delete(NodeDeleteCommand(
+            actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="group-1",
+            expected_revision=updated.canvas_revision,
+        ))
+        canvas = self.canvas_repository.load("canvas-1")
+        self.assertEqual(canvas["nodes"], [])
+        self.assertEqual(canvas["connections"], [])
+
+    def test_update_and_delete_empty_smart_group_preserves_its_group_shape(self):
+        before = self.canvas_repository.load("canvas-1")
+        self.canvas_repository.mutate_if_current("canvas-1", expected_updated_at=before["updated_at"], mutation=lambda canvas: canvas.update({
+            "nodes": [{"id": "smart-group-1", "type": "smart-group", "title": "智能分组", "items": [], "w": 300, "h": 220, "x": 20, "y": 30}],
+            "connections": [],
+        }))
+        revision = self.canvas_repository.load("canvas-1")["updated_at"]
+        updated = self.mutations.update(NodeUpdateCommand(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="smart-group-1", expected_revision=revision, position=Position(x=44, y=55)))
+        stored = self.canvas_repository.load("canvas-1")["nodes"][0]
+        self.assertEqual((stored["type"], stored["title"], stored["items"], stored["x"], stored["y"]), ("smart-group", "智能分组", [], 44, 55))
+        self.mutations.delete(NodeDeleteCommand(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="smart-group-1", expected_revision=updated.canvas_revision))
+        self.assertEqual(self.canvas_repository.load("canvas-1")["nodes"], [])
+
+    def test_update_and_delete_default_smart_loop_preserves_its_loop_shape(self):
+        before = self.canvas_repository.load("canvas-1")
+        self.canvas_repository.mutate_if_current("canvas-1", expected_updated_at=before["updated_at"], mutation=lambda canvas: canvas.update({"nodes": [{"id":"smart-loop-1", "type":"smart-loop", "count":1, "mode":"serial", "showPrompt":False, "imageInput":False, "loopStart":1, "imageBatchSize":1, "variablePrompt":"", "x":20, "y":30}], "connections": []}))
+        revision = self.canvas_repository.load("canvas-1")["updated_at"]
+        updated = self.mutations.update(NodeUpdateCommand(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="smart-loop-1", expected_revision=revision, position=Position(x=44, y=55)))
+        self.assertEqual((self.canvas_repository.load("canvas-1")["nodes"][0]["type"], self.canvas_repository.load("canvas-1")["nodes"][0]["x"]), ("smart-loop", 44))
+        self.mutations.delete(NodeDeleteCommand(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="smart-loop-1", expected_revision=updated.canvas_revision))
+        self.assertEqual(self.canvas_repository.load("canvas-1")["nodes"], [])

@@ -64,6 +64,76 @@
         });
     }
 
+    function createViewportPanSession(options) {
+        const settings = options && typeof options === 'object' ? options : {};
+        const start = normalizePoint(settings.start);
+        const initialViewport = normalizeViewport(settings.viewport);
+        const threshold = Math.max(0, finite(settings.threshold, 3));
+        const metric = settings.metric === 'manhattan' ? 'manhattan' : 'euclidean';
+        let moved = false;
+        return Object.freeze({
+            move(point) {
+                const current = normalizePoint(point);
+                const dx = current.x - start.x;
+                const dy = current.y - start.y;
+                const distance = metric === 'manhattan' ? Math.abs(dx) + Math.abs(dy) : Math.hypot(dx, dy);
+                if (distance > threshold) moved = true;
+                return Object.freeze({
+                    moved,
+                    viewport: Object.freeze({x: initialViewport.x + dx, y: initialViewport.y + dy, scale: initialViewport.scale}),
+                });
+            },
+        });
+    }
+
+    function viewportScaleForWheel(viewport, deltaY, options) {
+        const settings = options && typeof options === 'object' ? options : {};
+        const current = normalizeViewport(viewport).scale;
+        const strategy = settings.strategy === 'step' ? 'step' : 'exponential';
+        const rawDelta = finite(deltaY, 0);
+        let next;
+        if (strategy === 'step') {
+            next = current * (rawDelta > 0 ? finite(settings.outFactor, .92) : finite(settings.inFactor, 1.08));
+        } else {
+            const limit = Math.max(0, finite(settings.deltaLimit, Infinity));
+            const delta = clamp(rawDelta, -limit, limit);
+            next = current * Math.exp(-delta * finite(settings.sensitivity, .001));
+        }
+        if (!Number.isFinite(next) || next <= 0) return current;
+        const minimum = Number(settings.minScale);
+        const maximum = Number(settings.maxScale);
+        if (Number.isFinite(minimum) || Number.isFinite(maximum)) {
+            return clamp(next, Number.isFinite(minimum) ? minimum : 0.001, Number.isFinite(maximum) ? maximum : Infinity);
+        }
+        return next;
+    }
+
+    function viewportCenteredOnWorldPoint(viewport, point, size) {
+        const current = normalizeViewport(viewport);
+        const world = normalizePoint(point);
+        const dimensions = size && typeof size === 'object' ? size : {};
+        const width = Math.max(0, finite(dimensions.width, 0));
+        const height = Math.max(0, finite(dimensions.height, 0));
+        return Object.freeze({
+            x: width / 2 - world.x * current.scale,
+            y: height / 2 - world.y * current.scale,
+            scale: current.scale,
+        });
+    }
+
+    function worldPointFromMinimapPointer(pointer, projection) {
+        const client = normalizePoint(pointer);
+        const settings = projection && typeof projection === 'object' ? projection : {};
+        const screenOrigin = normalizePoint(settings.screenOrigin);
+        const worldOrigin = normalizePoint(settings.worldOrigin);
+        const offset = normalizePoint(settings.offset);
+        const scale = Math.max(.0001, finite(settings.scale, 1));
+        return Object.freeze({
+            x: worldOrigin.x + (client.x - screenOrigin.x - offset.x) / scale,
+            y: worldOrigin.y + (client.y - screenOrigin.y - offset.y) / scale,
+        });
+    }
+
     function normalizeSelection(ids, availableIds) {
         const allowed = availableIds ? new Set(Array.from(availableIds, String)) : null;
         const seen = new Set();
@@ -212,6 +282,10 @@
         create,
         normalizeSelection,
         normalizeViewport,
+        createViewportPanSession,
+        viewportScaleForWheel,
+        viewportCenteredOnWorldPoint,
+        worldPointFromMinimapPointer,
         screenToWorld,
         worldToScreen,
     });

@@ -1316,14 +1316,25 @@ function minimapEventToWorld(e){
     if(!minimapState) renderMinimap();
     const state = minimapState;
     const rect = minimapContent.getBoundingClientRect();
+    const sharedPoint = canvasUnifiedRuntimeEnabled
+        ? window.WorkbenchCanvasRuntime?.worldPointFromMinimapPointer?.({x:e.clientX, y:e.clientY}, {
+            screenOrigin:{x:rect.left, y:rect.top}, worldOrigin:{x:state.bounds.x, y:state.bounds.y}, offset:{x:state.ox, y:state.oy}, scale:state.scale,
+        })
+        : null;
+    if(sharedPoint) return sharedPoint;
     const x = (e.clientX - rect.left - state.ox) / state.scale + state.bounds.x;
     const y = (e.clientY - rect.top - state.oy) / state.scale + state.bounds.y;
     return {x, y};
 }
 function centerViewportOnWorldPoint(point){
     const rect = board.getBoundingClientRect();
-    viewport.x = rect.width / 2 - point.x * viewport.scale;
-    viewport.y = rect.height / 2 - point.y * viewport.scale;
+    const sharedViewport = canvasUnifiedRuntimeEnabled
+        ? window.WorkbenchCanvasRuntime?.viewportCenteredOnWorldPoint?.(viewport, point, {width:rect.width, height:rect.height})
+        : null;
+    if(!sharedViewport || !applyCanvasRuntimeViewport({type:window.WorkbenchCanvasRuntime.COMMANDS.VIEWPORT_SET, viewport:sharedViewport})){
+        viewport.x = rect.width / 2 - point.x * viewport.scale;
+        viewport.y = rect.height / 2 - point.y * viewport.scale;
+    }
     applyViewport();
     renderLinks();
     renderSelectionHub();
@@ -1336,7 +1347,7 @@ function fitAllNodesViewport(){
     const rect = board.getBoundingClientRect();
     if(window.WorkbenchCanvasViewportRecovery){
         const fitted = window.WorkbenchCanvasViewportRecovery.fit(nodes.map(estimatedNodeRect), {width:rect.width, height:rect.height}, {padding:180, inset:80, minScale:.06, maxScale:.82, emptyScale:.45});
-        viewport = {...fitted};
+        if(!applyCanvasRuntimeViewport({type:window.WorkbenchCanvasRuntime.COMMANDS.VIEWPORT_SET, viewport:fitted})) viewport = {...fitted};
         applyViewport();
         renderLinks();
         renderSelectionHub();
@@ -1387,15 +1398,15 @@ function exitZoomPreview(point=null){
     zoomPreviewState = null;
     shell.classList.remove('zoom-preview');
     document.body.classList.remove('canvas-zoom-preview');
-    viewport.scale = safeViewportScale(prev.scale);
+    const restoredScale = safeViewportScale(prev.scale);
+    let restoredViewport = {x:prev.x, y:prev.y, scale:restoredScale};
     if(point){
         const rect = board.getBoundingClientRect();
-        viewport.x = rect.width / 2 - point.x * viewport.scale;
-        viewport.y = rect.height / 2 - point.y * viewport.scale;
-    } else {
-        viewport.x = prev.x;
-        viewport.y = prev.y;
+        restoredViewport = (canvasUnifiedRuntimeEnabled
+            ? window.WorkbenchCanvasRuntime?.viewportCenteredOnWorldPoint?.(restoredViewport, point, {width:rect.width, height:rect.height})
+            : null) || {x:rect.width / 2 - point.x * restoredScale, y:rect.height / 2 - point.y * restoredScale, scale:restoredScale};
     }
+    if(!applyCanvasRuntimeViewport({type:window.WorkbenchCanvasRuntime.COMMANDS.VIEWPORT_SET, viewport:restoredViewport})) viewport = restoredViewport;
     applyViewport();
     renderLinks();
     renderSelectionHub();
@@ -1422,9 +1433,11 @@ function exitZoomPreviewToNode(nodeId){
     zoomPreviewState = null;
     shell.classList.remove('zoom-preview');
     document.body.classList.remove('canvas-zoom-preview');
-    viewport.scale = Math.max(safeViewportScale(prev.scale), readableScale);
-    viewport.x = boardRect.width / 2 - cx * viewport.scale;
-    viewport.y = boardRect.height / 2 - cy * viewport.scale;
+    const targetScale = Math.max(safeViewportScale(prev.scale), readableScale);
+    const targetViewport = (canvasUnifiedRuntimeEnabled
+        ? window.WorkbenchCanvasRuntime?.viewportCenteredOnWorldPoint?.({...prev, scale:targetScale}, {x:cx, y:cy}, {width:boardRect.width, height:boardRect.height})
+        : null) || {x:boardRect.width / 2 - cx * targetScale, y:boardRect.height / 2 - cy * targetScale, scale:targetScale};
+    if(!applyCanvasRuntimeViewport({type:window.WorkbenchCanvasRuntime.COMMANDS.VIEWPORT_SET, viewport:targetViewport})) viewport = targetViewport;
     applyViewport();
     renderLinks();
     renderSelectionHub();
@@ -2542,12 +2555,11 @@ async function addVersionedBlankImageNode(point){
             expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
             title:'空白图片',
         }, CLIENT_ID);
-        const node = {id:result.node.id, type:'image', x:p.x, y:p.y, url:'', name:result.node.title || '空白图片'};
-        nodes.push(node);
-        undoStack.push(undoSnapshot);
-        if(undoStack.length > UNDO_MAX) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        const node = window.WorkbenchNodeClient.applyCreationResult(result, {
+            nodes, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas,
+            projectNode:created => ({id:created.id, type:'image', x:p.x, y:p.y, url:'', name:created.title || '空白图片'}),
+            onRevision:revision => { lastCanvasUpdatedAt = revision; },
+        });
         render();
         return node;
     } catch(error) {
@@ -2568,12 +2580,11 @@ async function addVersionedBlankPromptNode(point){
             position:{x:p.x, y:p.y}, expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
             initial_config:{text:''}, title:'Prompt',
         }, CLIENT_ID);
-        const node = {id:result.node.id, type:'prompt', x:p.x, y:p.y, text:''};
-        nodes.push(node);
-        undoStack.push(undoSnapshot);
-        if(undoStack.length > UNDO_MAX) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        const node = window.WorkbenchNodeClient.applyCreationResult(result, {
+            nodes, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas,
+            projectNode:created => ({id:created.id, type:'prompt', x:p.x, y:p.y, text:''}),
+            onRevision:revision => { lastCanvasUpdatedAt = revision; },
+        });
         render();
         return node;
     } catch(error) {
@@ -2594,12 +2605,11 @@ async function addVersionedBlankLoopNode(point){
             position:{x:p.x, y:p.y}, expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
             initial_config:{count:3}, title:'Loop',
         }, CLIENT_ID);
-        const node = {id:result.node.id, type:'loop', x:p.x, y:p.y, count:3, mode:'serial', showPrompt:false, imageInput:false, videoInput:false, loopStart:1, imageBatchSize:1, videoBatchSize:1, variablePrompt:'', fixedPrompt:''};
-        nodes.push(node);
-        undoStack.push(undoSnapshot);
-        if(undoStack.length > UNDO_MAX) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        const node = window.WorkbenchNodeClient.applyCreationResult(result, {
+            nodes, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas,
+            projectNode:created => ({id:created.id, type:'loop', x:p.x, y:p.y, count:3, mode:'serial', showPrompt:false, imageInput:false, videoInput:false, loopStart:1, imageBatchSize:1, videoBatchSize:1, variablePrompt:'', fixedPrompt:''}),
+            onRevision:revision => { lastCanvasUpdatedAt = revision; },
+        });
         render();
         return node;
     } catch(error) {
@@ -2646,12 +2656,11 @@ async function addVersionedBlankGroupNode(point){
             definition_ref:{type:'legacy', id:'group', version:'0'},
             position:{x:p.x, y:p.y}, expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0), title:'Group',
         }, CLIENT_ID);
-        const node = {id:result.node.id, type:'group', x:p.x, y:p.y, w:300, h:220, items:[]};
-        nodes.push(node);
-        undoStack.push(undoSnapshot);
-        if(undoStack.length > UNDO_MAX) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        const node = window.WorkbenchNodeClient.applyCreationResult(result, {
+            nodes, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas,
+            projectNode:created => ({id:created.id, type:'group', x:p.x, y:p.y, w:300, h:220, items:[]}),
+            onRevision:revision => { lastCanvasUpdatedAt = revision; },
+        });
         render();
         return node;
     } catch(error) {
@@ -2671,12 +2680,11 @@ async function addVersionedBlankOutputNode(point){
             definition_ref:{type:'legacy', id:'output', version:'0'},
             position:{x:p.x, y:p.y}, expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0), title:'Output',
         }, CLIENT_ID);
-        const node = {id:result.node.id, type:'output', x:p.x, y:p.y, images:[]};
-        nodes.push(node);
-        undoStack.push(undoSnapshot);
-        if(undoStack.length > UNDO_MAX) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        const node = window.WorkbenchNodeClient.applyCreationResult(result, {
+            nodes, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas,
+            projectNode:created => ({id:created.id, type:'output', x:p.x, y:p.y, images:[]}),
+            onRevision:revision => { lastCanvasUpdatedAt = revision; },
+        });
         render();
         return node;
     } catch(error) {
@@ -3749,6 +3757,9 @@ async function downloadGroupNodeImages(groupId){
 }
 const classicVersionedConnectedNodeCreators = Object.freeze({
     group: createVersionedLinkedGroup,
+    image: createVersionedLinkedImage,
+    prompt: createVersionedLinkedPrompt,
+    loop: createVersionedLinkedLoop,
 });
 function createVersionedClassicConnectedNode(command, state, origin){
     const versionedCreator = classicVersionedConnectedNodeCreators[command?.createType];
@@ -3790,19 +3801,73 @@ async function createVersionedLinkedGroup(state, origin){
             existing_node_id:origin.id, edge_id:edgeId,
             direction:state.originKind === 'out' ? 'from_existing' : 'to_existing',
         }, CLIENT_ID);
-        nodes.push({id:result.node.id, type:'group', x:state.point.x, y:state.point.y, w:300, h:220, items:[]});
-        connections.push({id:result.edge.id, from:result.edge.from.node_id, to:result.edge.to.node_id});
-        undoStack.push(undoSnapshot);
-        if(undoStack.length > UNDO_MAX) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
-        syncLatestGeneratedOutputToConnection(result.edge.from.node_id, result.edge.to.node_id);
-        syncGeneratorInputs();
+        window.WorkbenchNodeClient.applyGraphCreationResult(result, {
+            nodes, connections, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas,
+            projectNode:created => ({id:created.id, type:'group', x:state.point.x, y:state.point.y, w:300, h:220, items:[]}),
+            projectEdge:edge => ({id:edge.id, from:edge.from.node_id, to:edge.to.node_id}),
+            onRevision:revision => { lastCanvasUpdatedAt = revision; },
+            onAfterCommit:(_node, edge) => {
+                syncLatestGeneratedOutputToConnection(edge.from, edge.to);
+                syncGeneratorInputs();
+            },
+        });
         render();
     } catch(error) {
         console.error('Versioned Group creation failed', error);
         setStatus('Create failed');
     }
+}
+async function createVersionedLinkedImage(state, origin){
+    const undoSnapshot = {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    const edgeId = uid('c');
+    try {
+        const result = await window.WorkbenchNodeClient.createNodeAndEdge(canvas.id, {
+            request_id:`${CLIENT_ID}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            project_id:canvas.project, source:'context_menu',
+            definition_ref:{type:'legacy', id:'image', version:'0'}, position:{x:state.point.x, y:state.point.y},
+            expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0), title:'Image',
+            existing_node_id:origin.id, edge_id:edgeId,
+            direction:state.originKind === 'out' ? 'from_existing' : 'to_existing',
+        }, CLIENT_ID);
+        window.WorkbenchNodeClient.applyGraphCreationResult(result, {
+            nodes, connections, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas,
+            projectNode:created => ({id:created.id, type:'image', x:state.point.x, y:state.point.y, name:created.title || 'Image', mediaKind:'image'}),
+            projectEdge:edge => ({id:edge.id, from:edge.from.node_id, to:edge.to.node_id}),
+            onRevision:revision => { lastCanvasUpdatedAt = revision; },
+            onAfterCommit:(_node, edge) => {
+                syncLatestGeneratedOutputToConnection(edge.from, edge.to);
+                syncGeneratorInputs();
+            },
+        });
+        render();
+    } catch(error) {
+        console.error('Versioned Image creation failed', error);
+        setStatus('Create failed');
+    }
+}
+async function createVersionedLinkedPrompt(state, origin){
+    return createVersionedLinkedClassicNode(state, origin, {definitionId:'prompt', title:'Prompt', projectNode:created => ({id:created.id, type:'prompt', x:state.point.x, y:state.point.y, text:''})});
+}
+async function createVersionedLinkedLoop(state, origin){
+    return createVersionedLinkedClassicNode(state, origin, {definitionId:'loop', title:'Loop', projectNode:created => ({id:created.id, type:'loop', x:state.point.x, y:state.point.y, count:3, mode:'serial', showPrompt:false, imageInput:false, videoInput:false, loopStart:1, imageBatchSize:1, videoBatchSize:1, variablePrompt:'', fixedPrompt:''})});
+}
+async function createVersionedLinkedClassicNode(state, origin, definition){
+    const undoSnapshot = {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    try {
+        const result = await window.WorkbenchNodeClient.createNodeAndEdge(canvas.id, {
+            request_id:`${CLIENT_ID}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            project_id:canvas.project, source:'context_menu', definition_ref:{type:'legacy', id:definition.definitionId, version:'0'},
+            position:{x:state.point.x, y:state.point.y}, expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0), title:definition.title,
+            initial_config:definition.definitionId === 'prompt' ? {text:''} : undefined,
+            existing_node_id:origin.id, edge_id:uid('c'), direction:state.originKind === 'out' ? 'from_existing' : 'to_existing',
+        }, CLIENT_ID);
+        window.WorkbenchNodeClient.applyGraphCreationResult(result, {
+            nodes, connections, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas, projectNode:definition.projectNode,
+            projectEdge:edge => ({id:edge.id, from:edge.from.node_id, to:edge.to.node_id}), onRevision:revision => { lastCanvasUpdatedAt = revision; },
+            onAfterCommit:(_node, edge) => { syncLatestGeneratedOutputToConnection(edge.from, edge.to); syncGeneratorInputs(); },
+        });
+        render();
+    } catch(error) { console.error(`Versioned ${definition.definitionId} creation failed`, error); setStatus('Create failed'); }
 }
 function createNodeByType(type, point){
     if(type === 'image') return addImageNode(point);
@@ -3858,31 +3923,13 @@ function isSupportedUploadFile(file){
         || /\.(png|jpe?g|webp|gif|bmp|avif|mp4|webm|mov|m4v|avi|mkv|mp3|wav|m4a|aac|ogg|flac)(\?|$)/.test(name);
 }
 function dataTransferItemEntry(item){
-    try { return item?.webkitGetAsEntry?.() || null; } catch { return null; }
+    return window.WorkbenchCanvasMediaDrop.entryForItem(item);
 }
 async function filesFromEntry(entry){
-    if(!entry) return [];
-    if(entry.isFile){
-        return new Promise(resolve => entry.file(file => resolve(file ? [file] : []), () => resolve([])));
-    }
-    if(!entry.isDirectory) return [];
-    const reader = entry.createReader();
-    const children = [];
-    while(true){
-        const batch = await new Promise(resolve => reader.readEntries(resolve, () => resolve([])));
-        if(!batch.length) break;
-        children.push(...batch);
-    }
-    const nested = await Promise.all(children.map(filesFromEntry));
-    return nested.flat();
+    return window.WorkbenchCanvasMediaDrop.filesFromEntry(entry);
 }
 async function uploadFilesFromDataTransfer(dataTransfer){
-    const items = [...(dataTransfer?.items || [])];
-    const entries = items.map(dataTransferItemEntry).filter(Boolean);
-    const raw = entries.length
-        ? (await Promise.all(entries.map(filesFromEntry))).flat()
-        : [...(dataTransfer?.files || [])];
-    return raw.filter(isSupportedUploadFile);
+    return window.WorkbenchCanvasMediaDrop.filesFromDataTransfer(dataTransfer, isSupportedUploadFile);
 }
 function isAudioUrl(url){
     return window.WorkbenchCanvasMediaKind.isKindForUrl(canvasOriginalMediaUrl(url), 'audio');
@@ -4080,45 +4127,8 @@ const IMAGE_DROP_TYPE_HINT_RE = /^(?:files?|image\/.+|text\/(?:uri-list|html|pla
 function dropDataTypes(dataTransfer){
     return [...(dataTransfer?.types || [])].map(type => String(type || ''));
 }
-function readDropData(dataTransfer, type){
-    try { return dataTransfer?.getData?.(type) || ''; } catch(_) { return ''; }
-}
-function decodeDropText(value){
-    const text = String(value || '').trim();
-    if(!text) return '';
-    try { return decodeURIComponent(text); } catch(_) { return text; }
-}
-function imageDropTextFragments(value){
-    const text = String(value || '').trim();
-    if(!text) return [];
-    const fragments = [];
-    if(/<img|<a\s/i.test(text)){
-        const doc = new DOMParser().parseFromString(text, 'text/html');
-        doc.querySelectorAll('img[src],a[href]').forEach(el => fragments.push(el.getAttribute('src') || el.getAttribute('href') || ''));
-    }
-    text.split(/\r?\n/).forEach(line => {
-        const item = line.trim();
-        if(item) fragments.push(item);
-    });
-    const downloadUrl = text.match(/^image\/[^\s:]+:(.+)$/i);
-    if(downloadUrl) fragments.push(downloadUrl[1]);
-    return fragments;
-}
-function uniqueValues(values){
-    const seen = new Set();
-    return values.filter(value => {
-        const key = String(value || '').trim();
-        if(!key || seen.has(key)) return false;
-        seen.add(key);
-        return true;
-    });
-}
 function dropTextCandidates(dataTransfer){
-    if(!dataTransfer) return [];
-    const types = uniqueValues([...IMAGE_DROP_TEXT_TYPES, ...dropDataTypes(dataTransfer)]);
-    const values = types.map(type => readDropData(dataTransfer, type)).filter(Boolean);
-    return uniqueValues(values.flatMap(imageDropTextFragments).map(decodeDropText))
-        .filter(s => s && !s.startsWith('#'));
+    return window.WorkbenchCanvasMediaDrop.textCandidates(dataTransfer, IMAGE_DROP_TEXT_TYPES);
 }
 function isRemoteImageDropValue(value){
     const text = String(value || '').trim();
@@ -4143,32 +4153,22 @@ function isLocalImageDropValue(value){
     const isPosixPath = clean.startsWith('/');
     return (isWindowsPath || isPosixPath) && IMAGE_DROP_EXT_RE.test(clean);
 }
-function imageFilesFromDataTransfer(dataTransfer){
-    return [...(dataTransfer?.files || [])].filter(isSupportedUploadFile);
-}
-function localImagePathsFromDataTransfer(dataTransfer){
-    return uniqueValues(dropTextCandidates(dataTransfer).filter(isLocalImageDropValue));
-}
-function imageUrlFromDataTransfer(dataTransfer){
-    return dropTextCandidates(dataTransfer).find(isRemoteImageDropValue) || '';
-}
 function imageDropPayload(dataTransfer){
-    const files = imageFilesFromDataTransfer(dataTransfer);
-    if(files.length) return {type:'files', files};
-    const localPaths = localImagePathsFromDataTransfer(dataTransfer);
-    if(localPaths.length) return {type:'localPaths', localPaths};
-    const url = imageUrlFromDataTransfer(dataTransfer);
-    if(url) return {type:'url', url};
-    return {type:'none'};
+    return window.WorkbenchCanvasMediaDrop.payload(dataTransfer, {
+        textTypes:IMAGE_DROP_TEXT_TYPES,
+        isSupportedFile:isSupportedUploadFile,
+        isLocalValue:isLocalImageDropValue,
+        isRemoteValue:isRemoteImageDropValue,
+    });
 }
 async function resolveImageDropPayload(dataTransfer){
-    const payload = imageDropPayload(dataTransfer);
-    if(payload.type !== 'none') return payload;
-    if(hasImageFiles(dataTransfer?.items)){
-        const files = await uploadFilesFromDataTransfer(dataTransfer);
-        if(files.length) return {type:'files', files};
-    }
-    return payload;
+    return window.WorkbenchCanvasMediaDrop.resolvePayload(dataTransfer, {
+        textTypes:IMAGE_DROP_TEXT_TYPES,
+        isSupportedFile:isSupportedUploadFile,
+        isLocalValue:isLocalImageDropValue,
+        isRemoteValue:isRemoteImageDropValue,
+        shouldTraverse:transfer => hasImageFiles(transfer?.items),
+    });
 }
 async function importLocalImages(paths){
     if(!paths?.length) return [];
@@ -4220,12 +4220,10 @@ async function uploadMediaFiles(files, point, onlyImages=false, opts={}){
         return onlyImages ? kind === 'image' : ['image','video','audio'].includes(kind);
     }).slice(0, CANVAS_UPLOAD_MAX);
     if(!supported.length) return [];
-    const form = new FormData();
-    supported.forEach(file => form.append('files', file));
-    const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(r=>r.json());
+    const uploaded = await window.WorkbenchCanvasMediaDrop.uploadFiles(supported);
     const base = point || screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
     const created = [];
-    (data.files || []).forEach((file, i) => {
+    uploaded.forEach((file, i) => {
         const kind = file.kind || mediaKindForUpload(supported[i]);
         const node = {
             id:uid('img'),
@@ -6337,7 +6335,7 @@ function canUseCanvasNodeShellForMedia(node){
 function canUseCanvasNodeShellForLegacy(node){
     // Form/task nodes keep their source-owned body while the shared host owns
     // chrome, menu, resize, and their declared connection ports.
-    return canvasLegacyRendererEnabled() && ['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type);
+    return window.WorkbenchRendererAdmission?.admits({enabled:canvasLegacyRendererEnabled(), types:['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup']}, node);
 }
 function canvasLegacyNodeShellPorts(node){
     if(node?.type === 'prompt') return {input:false, output:true};
@@ -6394,8 +6392,14 @@ function canvasShellPointer(detail={}){
 }
 function selectCanvasNodeFromShell(nodeId){
     if(!nodes.some(node => node.id === nodeId)) return;
-    selected.clear();
-    selected.add(nodeId);
+    // NodeShell is a Unified surface: on the default path its selection
+    // command must enter CanvasRuntime rather than maintaining a second
+    // Classic-only selection transition. The direct mutation is only the U7
+    // rollback for `unified_canvas=0`.
+    if(!applyCanvasRuntimeSelection([nodeId])) {
+        selected.clear();
+        selected.add(nodeId);
+    }
     refreshSelectionVisuals();
 }
 const canvasNodeShellIntentAdapter = window.WorkbenchUnifiedRenderHost.createIntentAdapter({
@@ -13601,10 +13605,282 @@ function clearNodeContentBeforeDelete(id){
     }
     return false;
 }
-function deleteNodeFromButton(id, event){
+function canUseVersionedBlankImageDelete(node){
+    if(!canUseVersionedImageCreation() || !node || node.type !== 'image' || node.url) return false;
+    // Group membership retains page-specific visual semantics. Do not route it
+    // through the narrow service until the complete group mutation contract is
+    // migrated; standalone blank Images have no such compatibility state.
+    return !nodes.some(candidate => Array.isArray(candidate.items) && candidate.items.includes(node.id));
+}
+async function commitVersionedBlankImagePosition(drag){
+    const node = drag?.node;
+    const changed = Number(node?.x) !== Number(drag?.ox) || Number(node?.y) !== Number(drag?.oy);
+    if(drag?.isLocalCopy || (drag?.children || []).length || !changed || !canUseVersionedBlankImageDelete(node)) return false;
+    try {
+        const result = await window.WorkbenchNodeClient.update(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
+            position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
+        }, CLIENT_ID);
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+    } catch(error) {
+        // Position is a canonical expected-revision write. Revert the visual
+        // optimistic move on failure instead of issuing a raw Canvas save.
+        console.error('Versioned blank Image position update failed', error);
+        node.x = drag.ox;
+        node.y = drag.oy;
+        applyCanvasRuntimeNodeMove(node);
+        render();
+        setStatus('Move failed');
+    }
+    return true;
+}
+function canUseVersionedBlankPromptDelete(node){
+    if(!canUseVersionedImageCreation() || !node || node.type !== 'prompt' || String(node.text || '').trim()) return false;
+    if(connections.some(connection => connection.from === node.id || connection.to === node.id)) return false;
+    return !nodes.some(candidate => Array.isArray(candidate.items) && candidate.items.includes(node.id));
+}
+async function commitVersionedBlankPromptPosition(drag){
+    const node = drag?.node;
+    const changed = Number(node?.x) !== Number(drag?.ox) || Number(node?.y) !== Number(drag?.oy);
+    if(drag?.isLocalCopy || (drag?.children || []).length || !changed || !canUseVersionedBlankPromptDelete(node)) return false;
+    try {
+        const result = await window.WorkbenchNodeClient.update(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
+            position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
+        }, CLIENT_ID);
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+    } catch(error) {
+        console.error('Versioned blank Prompt position update failed', error);
+        node.x = drag.ox;
+        node.y = drag.oy;
+        applyCanvasRuntimeNodeMove(node);
+        render();
+        setStatus('Move failed');
+    }
+    return true;
+}
+function canUseVersionedBlankLoopDelete(node){
+    if(!canUseVersionedImageCreation() || !node || node.type !== 'loop') return false;
+    if(Number(node.count || 3) !== 3 || node.mode === 'parallel' || node.showPrompt || node.imageInput || node.videoInput) return false;
+    if(Number(node.loopStart || 1) !== 1 || Number(node.imageBatchSize || 1) !== 1 || Number(node.videoBatchSize || 1) !== 1) return false;
+    if(String(node.variablePrompt || '').trim() || String(node.fixedPrompt || '').trim()) return false;
+    if(connections.some(connection => connection.from === node.id || connection.to === node.id)) return false;
+    return !nodes.some(candidate => Array.isArray(candidate.items) && candidate.items.includes(node.id));
+}
+function canUseVersionedBlankOutputDelete(node){
+    if(!canUseVersionedImageCreation() || !node || node.type !== 'output') return false;
+    if((node.images || []).length || (node._pending || []).length || Object.keys(node.imageComparisons || {}).length) return false;
+    if(connections.some(connection => connection.from === node.id || connection.to === node.id)) return false;
+    return !nodes.some(candidate => Array.isArray(candidate.items) && candidate.items.includes(node.id));
+}
+function canUseVersionedEmptyGroupDelete(node){
+    if(!canUseVersionedImageCreation() || !node || node.type !== 'group' || (node.items || []).length) return false;
+    if(connections.some(connection => connection.from === node.id || connection.to === node.id)) return false;
+    return !nodes.some(candidate => Array.isArray(candidate.items) && candidate.items.includes(node.id));
+}
+async function commitVersionedBlankLoopPosition(drag){
+    const node = drag?.node;
+    const changed = Number(node?.x) !== Number(drag?.ox) || Number(node?.y) !== Number(drag?.oy);
+    if(drag?.isLocalCopy || (drag?.children || []).length || !changed || !canUseVersionedBlankLoopDelete(node)) return false;
+    try {
+        const result = await window.WorkbenchNodeClient.update(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
+            position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
+        }, CLIENT_ID);
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+    } catch(error) {
+        console.error('Versioned blank Loop position update failed', error);
+        node.x = drag.ox;
+        node.y = drag.oy;
+        applyCanvasRuntimeNodeMove(node);
+        render();
+        setStatus('Move failed');
+    }
+    return true;
+}
+async function commitVersionedBlankOutputPosition(drag){
+    const node = drag?.node;
+    const changed = Number(node?.x) !== Number(drag?.ox) || Number(node?.y) !== Number(drag?.oy);
+    if(drag?.isLocalCopy || (drag?.children || []).length || !changed || !canUseVersionedBlankOutputDelete(node)) return false;
+    try {
+        const result = await window.WorkbenchNodeClient.update(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
+            position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
+        }, CLIENT_ID);
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+    } catch(error) {
+        console.error('Versioned blank Output position update failed', error);
+        node.x = drag.ox;
+        node.y = drag.oy;
+        applyCanvasRuntimeNodeMove(node);
+        render();
+        setStatus('Move failed');
+    }
+    return true;
+}
+async function commitVersionedEmptyGroupPosition(drag){
+    const node = drag?.node;
+    const changed = Number(node?.x) !== Number(drag?.ox) || Number(node?.y) !== Number(drag?.oy);
+    if(drag?.isLocalCopy || (drag?.children || []).length || !changed || !canUseVersionedEmptyGroupDelete(node)) return false;
+    try {
+        const result = await window.WorkbenchNodeClient.update(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
+            position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
+        }, CLIENT_ID);
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+    } catch(error) {
+        console.error('Versioned empty Group position update failed', error);
+        node.x = drag.ox;
+        node.y = drag.oy;
+        applyCanvasRuntimeNodeMove(node);
+        render();
+        setStatus('Move failed');
+    }
+    return true;
+}
+async function commitVersionedBlankClassicPosition(drag){
+    if(await commitVersionedBlankImagePosition(drag)) return true;
+    if(await commitVersionedBlankPromptPosition(drag)) return true;
+    if(await commitVersionedBlankLoopPosition(drag)) return true;
+    if(await commitVersionedBlankOutputPosition(drag)) return true;
+    return commitVersionedEmptyGroupPosition(drag);
+}
+async function deleteVersionedBlankImageNode(id){
+    const node = nodes.find(item => item.id === id);
+    if(!canUseVersionedBlankImageDelete(node)) return false;
+    const undoSnapshot = {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    try {
+        const result = await window.WorkbenchNodeClient.remove(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
+        }, CLIENT_ID);
+        nodes = nodes.filter(item => item.id !== node.id);
+        connections = connections.filter(connection => connection.from !== node.id && connection.to !== node.id);
+        selected.delete(node.id);
+        undoStack.push(undoSnapshot);
+        if(undoStack.length > UNDO_MAX) undoStack.shift();
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+        render();
+    } catch(error) {
+        // A stale or rejected service mutation must not fall through to a raw
+        // adapter save, which could overwrite the canonical revision.
+        console.error('Versioned blank Image deletion failed', error);
+        setStatus('Delete failed');
+    }
+    return true;
+}
+async function deleteVersionedBlankPromptNode(id){
+    const node = nodes.find(item => item.id === id);
+    if(!canUseVersionedBlankPromptDelete(node)) return false;
+    const undoSnapshot = {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    try {
+        const result = await window.WorkbenchNodeClient.remove(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
+        }, CLIENT_ID);
+        nodes = nodes.filter(item => item.id !== node.id);
+        connections = connections.filter(connection => connection.from !== node.id && connection.to !== node.id);
+        selected.delete(node.id);
+        undoStack.push(undoSnapshot);
+        if(undoStack.length > UNDO_MAX) undoStack.shift();
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+        render();
+    } catch(error) {
+        console.error('Versioned blank Prompt deletion failed', error);
+        setStatus('Delete failed');
+    }
+    return true;
+}
+async function deleteVersionedBlankLoopNode(id){
+    const node = nodes.find(item => item.id === id);
+    if(!canUseVersionedBlankLoopDelete(node)) return false;
+    const undoSnapshot = {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    try {
+        const result = await window.WorkbenchNodeClient.remove(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
+        }, CLIENT_ID);
+        nodes = nodes.filter(item => item.id !== node.id);
+        connections = connections.filter(connection => connection.from !== node.id && connection.to !== node.id);
+        selected.delete(node.id);
+        undoStack.push(undoSnapshot);
+        if(undoStack.length > UNDO_MAX) undoStack.shift();
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+        render();
+    } catch(error) {
+        console.error('Versioned blank Loop deletion failed', error);
+        setStatus('Delete failed');
+    }
+    return true;
+}
+async function deleteVersionedBlankOutputNode(id){
+    const node = nodes.find(item => item.id === id);
+    if(!canUseVersionedBlankOutputDelete(node)) return false;
+    const undoSnapshot = {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    try {
+        const result = await window.WorkbenchNodeClient.remove(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
+        }, CLIENT_ID);
+        nodes = nodes.filter(item => item.id !== node.id);
+        connections = connections.filter(connection => connection.from !== node.id && connection.to !== node.id);
+        selected.delete(node.id);
+        undoStack.push(undoSnapshot);
+        if(undoStack.length > UNDO_MAX) undoStack.shift();
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+        render();
+    } catch(error) {
+        console.error('Versioned blank Output deletion failed', error);
+        setStatus('Delete failed');
+    }
+    return true;
+}
+async function deleteVersionedEmptyGroupNode(id){
+    const node = nodes.find(item => item.id === id);
+    if(!canUseVersionedEmptyGroupDelete(node)) return false;
+    const undoSnapshot = {nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))};
+    try {
+        const result = await window.WorkbenchNodeClient.remove(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
+        }, CLIENT_ID);
+        nodes = nodes.filter(item => item.id !== node.id);
+        connections = connections.filter(connection => connection.from !== node.id && connection.to !== node.id);
+        selected.delete(node.id);
+        undoStack.push(undoSnapshot);
+        if(undoStack.length > UNDO_MAX) undoStack.shift();
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        lastCanvasUpdatedAt = canvas.updated_at;
+        render();
+    } catch(error) {
+        console.error('Versioned empty Group deletion failed', error);
+        setStatus('Delete failed');
+    }
+    return true;
+}
+async function deleteNodeFromButton(id, event){
     event?.preventDefault();
     event?.stopPropagation();
     if(clearNodeContentBeforeDelete(id)) return;
+    if(await deleteVersionedBlankImageNode(id)) return;
+    if(await deleteVersionedBlankPromptNode(id)) return;
+    if(await deleteVersionedBlankLoopNode(id)) return;
+    if(await deleteVersionedBlankOutputNode(id)) return;
+    if(await deleteVersionedEmptyGroupNode(id)) return;
     deleteNode(id, event);
 }
 function deleteConnection(id, event){
@@ -15043,12 +15319,15 @@ function finishSelection(){
     if(!selectDrag) return;
     const rect = selectionBox.getBoundingClientRect();
     selectionBox.style.display = 'none';
-    selected.clear();
+    const selectedIds = [];
     nodesEl.querySelectorAll('.node').forEach(el => {
         const r = el.getBoundingClientRect();
         const overlaps = r.left < rect.right && r.right > rect.left && r.top < rect.bottom && r.bottom > rect.top;
-        if(overlaps) selected.add(el.dataset.id);
+        if(overlaps) selectedIds.push(el.dataset.id);
     });
+    // The overlap calculation is adapter-specific DOM work; the completed
+    // selection transition belongs to the default Unified runtime.
+    if(!applyCanvasRuntimeSelection(selectedIds)) selected = new Set(selectedIds);
     selectDrag = null;
     document.body.classList.remove('canvas-selecting');
     window.onmousemove = null;
@@ -15451,7 +15730,7 @@ function startNodeDrag(e, node){
         [...selected].forEach(id => collect(nodes.find(n => n.id === id)));
     }
     const children = [...collected.values()];
-    dragNode = {node: dragTarget, children, sx:e.clientX, sy:e.clientY, ox:dragTarget.x, oy:dragTarget.y};
+    dragNode = {node: dragTarget, children, sx:e.clientX, sy:e.clientY, ox:dragTarget.x, oy:dragTarget.y, isLocalCopy:Boolean(e.altKey)};
     document.body.classList.add('canvas-node-drag');
     window.onmousemove = onNodeDrag;
     window.onmouseup = endDrag;
@@ -15652,11 +15931,14 @@ function sanitizeConnections(){
 function endDrag(event=null){
     const hadContentDrag = Boolean(dragNode || resizeNode || llmPaneDrag || knifeChanged || tempLink);
     const hadViewportDrag = Boolean(dragBoard || minimapDrag);
-    if(dragNode){
-        const moved = [dragNode.node, ...(dragNode.children || []).map(c => c.node)].filter(Boolean);
+    const nodeDrag = dragNode;
+    let versionedPositionCommit = null;
+    if(nodeDrag){
+        const moved = [nodeDrag.node, ...(nodeDrag.children || []).map(c => c.node)].filter(Boolean);
         // 拖动 group/promptGroup 自身时不重新评估（成员跟着一起走，包含关系不变）
         const draggedGroup = moved.some(n => n.type === 'group' || n.type === 'promptGroup');
         if(!draggedGroup) updateGroupMembership(moved);
+        versionedPositionCommit = nodeDrag;
     }
     dragNode = null;
     dragBoard = null;
@@ -15675,7 +15957,15 @@ function endDrag(event=null){
     window.onmouseup = null;
     if(shouldRenderKnife) render();
     scheduleMinimapRender();
-    if(hadContentDrag) scheduleSave();
+    if(hadContentDrag) {
+        // The narrow versioned move covers only standalone blank Image/Prompt nodes;
+        // every richer Legacy drag remains on its compatibility mutation path.
+        if(versionedPositionCommit) {
+            void commitVersionedBlankClassicPosition(versionedPositionCommit).then(handled => {
+                if(!handled) scheduleSave();
+            });
+        } else scheduleSave();
+    }
     else if(hadViewportDrag) scheduleViewportSave();
 }
 function nodeRect(n){
@@ -16165,11 +16455,16 @@ function startBoardPan(e, opts={}){
     e.stopPropagation();
     closeCreateMenu();
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
-    dragBoard = {sx:e.clientX, sy:e.clientY, ox:viewport.x, oy:viewport.y, moved:false, clearSelectionOnClick:Boolean(opts.clearSelectionOnClick)};
+    const panSession = canvasUnifiedRuntimeEnabled
+        ? window.WorkbenchCanvasRuntime?.createViewportPanSession?.({start:{x:e.clientX, y:e.clientY}, viewport, threshold:4})
+        : null;
+    dragBoard = {sx:e.clientX, sy:e.clientY, ox:viewport.x, oy:viewport.y, moved:false, panSession, clearSelectionOnClick:Boolean(opts.clearSelectionOnClick)};
     document.body.classList.add('canvas-board-pan');
     window.onmousemove = e2 => {
-        if(Math.hypot(e2.clientX - dragBoard.sx, e2.clientY - dragBoard.sy) > 4) dragBoard.moved = true;
-        const nextViewport = {x:dragBoard.ox + e2.clientX - dragBoard.sx, y:dragBoard.oy + e2.clientY - dragBoard.sy, scale:viewport.scale};
+        const pan = dragBoard.panSession?.move({x:e2.clientX, y:e2.clientY});
+        if(pan) dragBoard.moved = pan.moved;
+        else if(Math.hypot(e2.clientX - dragBoard.sx, e2.clientY - dragBoard.sy) > 4) dragBoard.moved = true;
+        const nextViewport = pan?.viewport || {x:dragBoard.ox + e2.clientX - dragBoard.sx, y:dragBoard.oy + e2.clientY - dragBoard.sy, scale:viewport.scale};
         if(!applyCanvasRuntimeViewport({type:window.WorkbenchCanvasRuntime?.COMMANDS.VIEWPORT_SET, viewport:nextViewport})) viewport = nextViewport;
         applyViewport();
     };
@@ -16240,7 +16535,10 @@ board.onwheel = e => {
     if(!canvas) return;
     e.preventDefault();
     const rect = board.getBoundingClientRect();
-    const nextScale = safeViewportScale(viewport.scale * (e.deltaY > 0 ? .92 : 1.08));
+    const sharedNextScale = canvasUnifiedRuntimeEnabled
+        ? window.WorkbenchCanvasRuntime?.viewportScaleForWheel?.(viewport, e.deltaY, {strategy:'step', outFactor:.92, inFactor:1.08})
+        : null;
+    const nextScale = sharedNextScale || safeViewportScale(viewport.scale * (e.deltaY > 0 ? .92 : 1.08));
     if(!applyCanvasRuntimeViewport({
         type:window.WorkbenchCanvasRuntime?.COMMANDS.VIEWPORT_ZOOM_AT,
         anchor:{x:e.clientX - rect.left, y:e.clientY - rect.top}, scale:nextScale,

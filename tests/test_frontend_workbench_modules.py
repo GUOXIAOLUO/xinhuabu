@@ -8,6 +8,31 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FrontendWorkbenchModulesTests(unittest.TestCase):
+    def test_renderer_admission_is_a_pure_declared_policy_boundary(self):
+        admission = (ROOT / "static" / "js" / "workbench" / "canvas" / "renderer-admission.js").read_text(encoding="utf-8")
+        self.assertIn("function admits(policy, node)", admission)
+        self.assertIn("if (!settings.enabled || !node) return false;", admission)
+        self.assertIn("if (Array.isArray(settings.types)) return settings.types.includes(node.type);", admission)
+        self.assertIn("if (typeof settings.accepts === 'function') return Boolean(settings.accepts(node));", admission)
+        self.assertNotIn("fetch(", admission)
+        self.assertNotIn("localStorage", admission)
+
+    def test_media_playback_state_is_transport_and_dom_lifecycle_neutral(self):
+        playback = (ROOT / "static" / "js" / "workbench" / "canvas" / "media-playback-state.js").read_text(encoding="utf-8")
+        self.assertIn("function capture(media)", playback)
+        self.assertIn("function restore(media, state)", playback)
+        self.assertIn("function captureAll(root, options = {})", playback)
+        self.assertIn("function restoreAll(root, states, options = {})", playback)
+        self.assertNotIn("fetch(", playback)
+        self.assertNotIn("localStorage", playback)
+
+    def test_renderer_admission_loads_before_canvas_adapters(self):
+        classic = (ROOT / "static" / "canvas.html").read_text(encoding="utf-8")
+        smart = (ROOT / "static" / "smart-canvas.html").read_text(encoding="utf-8")
+        for page in (classic, smart):
+            self.assertLess(page.index("renderer-registry.js"), page.index("renderer-admission.js"))
+            self.assertLess(page.index("renderer-admission.js"), page.index("node-card-host.js"))
+
     def test_editor_adapters_share_execution_result_media_normalization(self):
         client = ROOT / "static" / "js" / "workbench" / "canvas" / "media-result-normalizer.js"
         script = f"""
@@ -28,6 +53,20 @@ console.log(JSON.stringify({{classic, smart}}));
             editor_source = (ROOT / "static" / "js" / editor).read_text(encoding="utf-8")
             self.assertLess(page_source.index("workbench/canvas/media-result-normalizer.js"), page_source.index(editor))
             self.assertIn("WorkbenchCanvasMediaResultNormalizer.extract", editor_source)
+
+    def test_versioned_node_creation_is_default_on_loopback_with_an_explicit_rollback(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "node-creation-client.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm');
+function enabled(search) {{
+  const sandbox = {{window: {{location: {{hostname:'127.0.0.1', search}}}}, URLSearchParams, fetch:() => {{}}}};
+  vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+  return sandbox.window.WorkbenchNodeClient.isEnabled();
+}}
+console.log(JSON.stringify({{normal:enabled(''), explicitEnable:enabled('?versioned_nodes=1'), rollback:enabled('?versioned_nodes=0')}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {"normal": True, "explicitEnable": True, "rollback": False})
     def test_editor_adapters_share_pure_media_kind_classification(self):
         client = ROOT / "static" / "js" / "workbench" / "canvas" / "media-kind.js"
         script = f"""
@@ -884,6 +923,140 @@ console.log(JSON.stringify({{match, own, stale, wrongCanvas}}));
         self.assertIn("const oldViewportStyle = oldViewport?.getAttribute('style') || '';", harness)
         self.assertIn("nextViewport.getAttribute('style') !== oldViewportStyle", harness)
 
+    def test_shared_viewport_pan_session_preserves_adapter_thresholds(self):
+        runtime = ROOT / "static" / "js" / "workbench" / "canvas" / "runtime-state.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(runtime))}, 'utf8'), sandbox);
+const shared = sandbox.window.WorkbenchCanvasRuntime;
+const classic = shared.createViewportPanSession({{start:{{x:10,y:20}}, viewport:{{x:5,y:6,scale:2}}, threshold:4}}).move({{x:13,y:24}});
+const smart = shared.createViewportPanSession({{start:{{x:0,y:0}}, viewport:{{x:1,y:2,scale:1}}, threshold:3, metric:'manhattan'}}).move({{x:2,y:2}});
+const classicZoom = shared.viewportScaleForWheel({{x:0,y:0,scale:1}}, 4, {{strategy:'step', outFactor:.92, inFactor:1.08}});
+const smartZoom = shared.viewportScaleForWheel({{x:0,y:0,scale:1}}, -1000, {{strategy:'exponential', deltaLimit:240, sensitivity:.001, minScale:.06, maxScale:3}});
+const minimapViewport = shared.viewportCenteredOnWorldPoint({{x:4,y:5,scale:2}}, {{x:30,y:40}}, {{width:200,height:120}});
+const minimapPoint = shared.worldPointFromMinimapPointer({{x:62,y:88}}, {{screenOrigin:{{x:10,y:20}}, worldOrigin:{{x:-100,y:50}}, offset:{{x:2,y:4}}, scale:2}});
+console.log(JSON.stringify({{classic, smart, classicZoom, smartZoom, minimapViewport, minimapPoint}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "classic": {"moved": True, "viewport": {"x": 8, "y": 10, "scale": 2}},
+            "smart": {"moved": True, "viewport": {"x": 3, "y": 4, "scale": 1}},
+            "classicZoom": 0.92,
+            "smartZoom": 1.2712491503214047,
+            "minimapViewport": {"x": 40, "y": -20, "scale": 2},
+            "minimapPoint": {"x": -75, "y": 82},
+        })
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        self.assertIn("canvasUnifiedRuntimeEnabled", classic)
+        self.assertIn("createViewportPanSession", classic)
+        self.assertIn("viewportScaleForWheel", classic)
+        self.assertIn("viewportCenteredOnWorldPoint", classic)
+        self.assertIn("worldPointFromMinimapPointer", classic)
+        self.assertIn("let restoredViewport = {x:prev.x, y:prev.y, scale:restoredScale};", classic)
+        self.assertIn("const targetViewport = (canvasUnifiedRuntimeEnabled", classic)
+        self.assertIn("smartUnifiedRuntimeEnabled", smart)
+        self.assertIn("metric:'manhattan'", smart)
+        self.assertIn("strategy:'exponential'", smart)
+        self.assertIn("viewportCenteredOnWorldPoint", smart)
+        self.assertIn("worldPointFromMinimapPointer", smart)
+        self.assertIn("let restoredViewport = {x:prev.x, y:prev.y, scale:prev.scale};", smart)
+        self.assertIn("const targetViewport = (smartUnifiedRuntimeEnabled", smart)
+
+    def test_node_creation_client_projects_service_results_without_page_specific_shapes(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "node-creation-client.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const api = sandbox.window.WorkbenchNodeClient;
+const nodes = []; const undo = []; const canvas = {{updated_at:2}}; let revision = 0; let selected = '';
+const node = api.applyCreationResult({{node:{{id:'created', title:'Created'}}, canvas_revision:7}}, {{
+  nodes, undoStack:undo, undoSnapshot:{{before:true}}, undoLimit:1, canvas,
+  projectNode:source => ({{id:source.id, title:source.title, compatibility:true}}),
+  onRevision:value => revision = value, onSelected:value => selected = value.id,
+}});
+const graphNodes = [{{id:'existing'}}]; const graphConnections = []; const graphUndo = [];
+const graphCanvas = {{updated_at:7}}; let graphSelected = '';
+const graphNode = api.applyGraphCreationResult({{
+  node:{{id:'connected', title:'Connected'}},
+  edge:{{id:'edge', from:{{node_id:'connected'}}, to:{{node_id:'existing'}}}},
+  canvas_revision:8,
+}}, {{
+  nodes:graphNodes, connections:graphConnections, undoStack:graphUndo, undoSnapshot:{{beforeGraph:true}}, undoLimit:1, canvas:graphCanvas,
+  projectNode:source => ({{id:source.id, title:source.title, compatibility:true}}),
+  projectEdge:edge => ({{id:edge.id, from:edge.from.node_id, to:edge.to.node_id, kind:'input'}}),
+  syncTargetInput:true, onSelected:value => graphSelected = value.id,
+}});
+console.log(JSON.stringify({{node, nodes, undo, revision, selected, canvas, graph:{{graphNode, graphNodes, graphConnections, graphUndo, graphCanvas, graphSelected}}}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "node": {"id": "created", "title": "Created", "compatibility": True},
+            "nodes": [{"id": "created", "title": "Created", "compatibility": True}],
+            "undo": [{"before": True}], "revision": 7, "selected": "created", "canvas": {"updated_at": 7},
+            "graph": {
+                "graphNode": {"id": "connected", "title": "Connected", "compatibility": True},
+                "graphNodes": [
+                    {"id": "existing", "inputNodeIds": ["connected"]},
+                    {"id": "connected", "title": "Connected", "compatibility": True},
+                ],
+                "graphConnections": [{"id": "edge", "from": "connected", "to": "existing", "kind": "input"}],
+                "graphUndo": [{"beforeGraph": True}], "graphCanvas": {"updated_at": 8}, "graphSelected": "connected",
+            },
+        })
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        self.assertGreaterEqual(classic.count("WorkbenchNodeClient.applyCreationResult(result"), 5)
+        self.assertGreaterEqual(smart.count("WorkbenchNodeClient.applyCreationResult(result"), 5)
+        self.assertGreaterEqual(classic.count("WorkbenchNodeClient.applyGraphCreationResult(result"), 2)
+        self.assertIn("WorkbenchNodeClient.applyGraphCreationResult(result", smart)
+
+    def test_media_drop_payload_traverses_directory_entries_and_preserves_adapter_filtering(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "media-drop-payload.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const api = sandbox.window.WorkbenchCanvasMediaDrop;
+const image = {{name:'image.png', allowed:true}}; const ignored = {{name:'notes.txt', allowed:false}};
+const fileEntry = file => ({{isFile:true, file:resolve => resolve(file)}});
+const directory = {{
+  isDirectory:true,
+  createReader:() => {{ let pass = 0; return {{readEntries:resolve => resolve(pass++ ? [] : [fileEntry(image), fileEntry(ignored)])}}; }},
+}};
+(async () => {{
+  const fromDirectory = await api.filesFromDataTransfer({{items:[{{webkitGetAsEntry:() => directory}}]}}, file => file.allowed);
+  const fromFiles = await api.filesFromDataTransfer({{files:[image, ignored]}}, file => file.allowed);
+  const textPayload = await api.resolvePayload({{
+    files:[], types:['text/plain'], getData:() => '/tmp/input.png\\nhttps://example.test/remote.png',
+  }}, {{
+    textTypes:['text/plain'], isSupportedFile:file => file.allowed,
+    isLocalValue:value => value.startsWith('/tmp/'), isRemoteValue:value => value.startsWith('https://'),
+  }});
+  class FakeFormData {{ constructor() {{ this.parts = []; }} append(field, file, name) {{ this.parts.push({{field, file:file.name, name:name || null}}); }} }}
+  sandbox.window.FormData = FakeFormData;
+  sandbox.window.fetch = async () => ({{ok:true, status:200, json:async () => ({{files:[{{url:'/output/image.png'}}]}})}});
+  const uploaded = await api.uploadFiles([image], {{fileName:file => `stored-${{file.name}}`}});
+  console.log(JSON.stringify({{fromDirectory:fromDirectory.map(file => file.name), fromFiles:fromFiles.map(file => file.name), textPayload, uploaded}}));
+}})();
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "fromDirectory": ["image.png"], "fromFiles": ["image.png"],
+            "textPayload": {"type": "localPaths", "localPaths": ["/tmp/input.png"]},
+            "uploaded": [{"url": "/output/image.png"}],
+        })
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        self.assertIn("WorkbenchCanvasMediaDrop.filesFromDataTransfer(dataTransfer, isSupportedUploadFile)", classic)
+        self.assertIn("WorkbenchCanvasMediaDrop.filesFromDataTransfer(dataTransfer, isSupportedUploadFile)", smart)
+        self.assertIn("WorkbenchCanvasMediaDrop.resolvePayload(dataTransfer", classic)
+        self.assertIn("WorkbenchCanvasMediaDrop.resolvePayload(dataTransfer", smart)
+        self.assertIn("WorkbenchCanvasMediaDrop.uploadFiles(supported)", classic)
+        self.assertIn("WorkbenchCanvasMediaDrop.uploadFiles(supported", smart)
+
     def test_unified_render_host_selects_registered_renderers_without_source_page_branches(self):
         host = (ROOT / "static" / "js" / "workbench" / "canvas" / "unified-render-host.js").read_text(encoding="utf-8")
         card_host = (ROOT / "static" / "js" / "workbench" / "canvas" / "node-card-host.js").read_text(encoding="utf-8")
@@ -1263,12 +1436,13 @@ console.log(JSON.stringify({{
         self.assertIn("legacy-renderer.js?v=2026.08.28.1788438695", page)
         self.assertIn("media-renderer.js?v=2026.08.28.1788438695", page)
         self.assertIn("semantic-zoom.js?v=2026.08.28.1788370356", page)
-        self.assertIn("command-registry.js?v=2026.09.04.5", page)
+        self.assertIn("command-registry.js?v=2026.09.06.6", page)
         self.assertIn("creation-catalog.js?v=2026.09.04.1", page)
         self.assertIn("generation-intent.js?v=2026.09.04.1", page)
-        self.assertIn("smart-canvas.js?v=2026.09.04.9", page)
+        self.assertIn("smart-canvas.js?v=2026.09.06.9", page)
 
     def test_smart_node_inspector_sections_are_ephemeral_and_collapsible(self):
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
         smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
         styles = (ROOT / "static" / "css" / "smart-canvas.css").read_text(encoding="utf-8")
         self.assertIn("const smartNodeInspectorCollapsedSections = new Map();", smart)
@@ -1287,10 +1461,23 @@ console.log(JSON.stringify({{
         self.assertIn("inspector.selectionViewModel(records)", smart)
         self.assertIn("function applySmartNodeSelection(nodeId, options={})", smart)
         self.assertIn("smartSelectionToggleRequested(e)", smart)
+        smart_event_bindings = smart[smart.index("function bindNodeEvents()") :]
+        smart_media_selection = smart_event_bindings[smart_event_bindings.index("el.querySelectorAll('.thumb-item,.image-wrap')") : smart_event_bindings.index("el.querySelectorAll('.thumb-item,.smart-group-single-thumb')")]
+        self.assertGreaterEqual(smart_media_selection.count("applySmartNodeSelection(id);"), 4)
+        self.assertNotIn("selectedId = id;", smart_media_selection)
+        smart_upload_target = smart_event_bindings[smart_event_bindings.index("nodeDrop?.addEventListener('click'") : smart_event_bindings.index("el.querySelectorAll('.node-delete')")]
+        self.assertIn("applySmartNodeSelection(id);", smart_upload_target)
+        self.assertNotIn("selectedId = id;", smart_upload_target)
+        smart_group_menu_selection = smart[smart.index("shell.oncontextmenu = e =>") : smart.index("shell.ondblclick = e =>")]
+        self.assertIn("applySmartNodeSelection(groupEl.dataset.id);", smart_group_menu_selection)
+        self.assertNotIn("selectedId = groupEl.dataset.id;", smart_group_menu_selection)
         self.assertIn("const CANVAS_SCALE_MIN = 0.06;", smart)
         self.assertIn("const CANVAS_SCALE_MAX = 3;", smart)
         self.assertIn("const CANVAS_WHEEL_DELTA_LIMIT = 240;", smart)
-        self.assertIn("const nextScale = safeScale(viewport.scale * factor);", smart)
+        self.assertIn("const nextScale = sharedNextScale || safeScale(viewport.scale * factor);", smart)
+        self.assertIn("viewportScaleForWheel?.(viewport, e.deltaY", smart)
+        self.assertIn("applyCanvasRuntimeViewport({type:window.WorkbenchCanvasRuntime.COMMANDS.VIEWPORT_SET, viewport:fitted})", classic)
+        self.assertIn("applySmartRuntimeViewport({type:window.WorkbenchCanvasRuntime.COMMANDS.VIEWPORT_SET, viewport:fitted})", smart)
         self.assertIn("function recoverSmartViewportIfCorrupt()", smart)
         self.assertIn("function restoreSmartViewportToVisibleNodes()", smart)
         self.assertIn("if(key === 'f'){", smart)
@@ -1353,9 +1540,13 @@ console.log(JSON.stringify({{
         self.assertIn("function createClassicMenuNode(command, point){", classic)
         self.assertIn("usesVersionedBlankCreation(command, 'classic')", classic)
         self.assertIn("const classicVersionedConnectedNodeCreators = Object.freeze({", classic)
+        self.assertIn("image: createVersionedLinkedImage", classic)
+        self.assertIn("prompt: createVersionedLinkedPrompt", classic)
+        self.assertIn("loop: createVersionedLinkedLoop", classic)
         self.assertIn("usesVersionedConnectedCreation(command, 'classic')", classic)
         self.assertIn("function quickAdd(type){", classic)
         self.assertIn("return createClassicMenuNode(command, point);", classic)
+
         self.assertIn("const smartVersionedBlankNodeCreators = Object.freeze({", smart)
         self.assertIn("minimax: point => createVersionedBlankSmartMinimax(point)", smart)
         self.assertIn("definition_ref:{type:'legacy', id:'smart-minimax', version:'0'}", smart)
@@ -1378,11 +1569,38 @@ console.log(JSON.stringify({{
         self.assertIn("minimax: createVersionedConnectedSmartMinimax", smart)
         self.assertIn("applyVersionedSmartConnectedNode", smart)
         self.assertIn("WorkbenchNodeClient.createNodeAndEdge", smart)
-        self.assertLess(
-            smart.index("nodes.push(node);", smart.index("function applyVersionedSmartConnectedNode")),
-            smart.index("const target = nodes.find", smart.index("function applyVersionedSmartConnectedNode")),
-        )
+        connected_apply = smart[smart.index("function applyVersionedSmartConnectedNode"):smart.index("async function createVersionedConnectedSmartPrompt")]
+        client = (ROOT / "static" / "js" / "workbench" / "canvas" / "node-creation-client.js").read_text(encoding="utf-8")
+        self.assertIn("WorkbenchNodeClient.applyGraphCreationResult", connected_apply)
+        self.assertIn("syncTargetInput:true", connected_apply)
+        self.assertIn("target.inputNodeIds = Array.from", client)
+        self.assertNotIn("scheduleSave();", connected_apply)
         self.assertIn("connectInputNode(fromId, toId)", smart)
+
+    def test_classic_connected_blank_image_uses_the_versioned_graph_mutation_route(self):
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        create_block = classic[classic.index("async function createVersionedLinkedImage"):classic.index("function createNodeByType")]
+        self.assertIn("definition_ref:{type:'legacy', id:'image', version:'0'}", create_block)
+        self.assertIn("await window.WorkbenchNodeClient.createNodeAndEdge(canvas.id", create_block)
+        self.assertIn("type:'image'", create_block)
+        self.assertIn("mediaKind:'image'", create_block)
+        self.assertNotIn("scheduleSave();", create_block)
+
+    def test_classic_connected_blank_prompt_and_loop_use_the_versioned_graph_mutation_route(self):
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        block = classic[classic.index("async function createVersionedLinkedPrompt"):classic.index("function createNodeByType")]
+        registry = (ROOT / "static" / "js" / "workbench" / "canvas" / "command-registry.js").read_text(encoding="utf-8")
+        repository = (ROOT / "workbench" / "repositories" / "legacy_json_node_repository.py").read_text(encoding="utf-8")
+        self.assertIn("definitionId:'prompt'", block)
+        self.assertIn("definitionId:'loop'", block)
+        self.assertIn("await window.WorkbenchNodeClient.createNodeAndEdge(canvas.id", block)
+        self.assertIn("initial_config:definition.definitionId === 'prompt' ? {text:''} : undefined", block)
+        self.assertNotIn("scheduleSave();", block)
+        self.assertIn("['canvas.create.prompt', 'prompt', ['classic', 'smart'], 20, ['classic', 'smart'], ['classic', 'smart']]", registry)
+        self.assertIn("['canvas.create.loop', 'loop', ['classic', 'smart'], 30, ['classic', 'smart'], ['classic', 'smart']]", registry)
+        self.assertIn('"prompt", "loop", "group"', repository)
+        self.assertIn('elif definition_id == "prompt":', repository)
+        self.assertIn('elif definition_id == "loop":', repository)
 
     def test_smart_port_hover_uses_the_shared_data_type_compatibility_contract(self):
         smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
@@ -1553,6 +1771,146 @@ console.log(JSON.stringify({{
         self.assertNotIn("onclick=\"addLLMNode()\"", toolbar)
         self.assertIn("function quickAdd(type)", classic)
 
+    def test_completed_box_selection_commits_through_the_shared_runtime_on_both_adapters(self):
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        classic_finish = classic[classic.index("function finishSelection(){"):classic.index("function renderSelectionHub(){")]
+        smart_finish = smart[smart.index("function finishSelection(event){"):smart.index("function groupSelectedNodes(){")]
+        self.assertIn("const selectedIds = []", classic_finish)
+        self.assertIn("if(!applyCanvasRuntimeSelection(selectedIds)) selected = new Set(selectedIds);", classic_finish)
+        self.assertIn("const nextSelectedIds = nodes.filter", smart_finish)
+        self.assertIn("if(!applySmartRuntimeSelection(nextSelectedIds))", smart_finish)
+
+    def test_classic_standalone_blank_image_delete_uses_the_versioned_mutation_route(self):
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        delete_block = classic[classic.index("function canUseVersionedBlankImageDelete(node)"):classic.index("function deleteConnection(id, event){")]
+        self.assertIn("node.type !== 'image' || node.url", delete_block)
+        self.assertIn("Array.isArray(candidate.items) && candidate.items.includes(node.id)", delete_block)
+        self.assertIn("await window.WorkbenchNodeClient.remove(canvas.id, node.id", delete_block)
+        self.assertIn("expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0)", delete_block)
+        self.assertIn("if(await deleteVersionedBlankImageNode(id)) return;", delete_block)
+        self.assertNotIn("scheduleSave();", delete_block)
+
+    def test_classic_standalone_blank_image_move_uses_versioned_position_mutation(self):
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        move_block = classic[classic.index("async function commitVersionedBlankImagePosition(drag)"):classic.index("async function deleteVersionedBlankImageNode(id)")]
+        end_drag = classic[classic.index("function endDrag(event=null){"):classic.index("function nodeRect(n){")]
+        self.assertIn("drag?.isLocalCopy || (drag?.children || []).length", move_block)
+        self.assertIn("await window.WorkbenchNodeClient.update(canvas.id, node.id", move_block)
+        self.assertIn("position:{x:Number(node.x) || 0, y:Number(node.y) || 0}", move_block)
+        self.assertIn("node.x = drag.ox;", move_block)
+        self.assertIn("node.y = drag.oy;", move_block)
+        self.assertIn("void commitVersionedBlankClassicPosition(versionedPositionCommit)", end_drag)
+        self.assertIn("if(!handled) scheduleSave();", end_drag)
+
+    def test_classic_standalone_blank_prompt_uses_the_versioned_mutation_route(self):
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        block = classic[classic.index("function canUseVersionedBlankPromptDelete(node)"):classic.index("async function deleteNodeFromButton")]
+        self.assertIn("node.type !== 'prompt' || String(node.text || '').trim()", block)
+        self.assertIn("connections.some(connection => connection.from === node.id || connection.to === node.id)", block)
+        self.assertIn("await window.WorkbenchNodeClient.update(canvas.id, node.id", block)
+        self.assertIn("await window.WorkbenchNodeClient.remove(canvas.id, node.id", block)
+        self.assertIn("if(await commitVersionedBlankImagePosition(drag)) return true;", block)
+        self.assertIn("if(await commitVersionedBlankPromptPosition(drag)) return true;", block)
+        self.assertIn("if(await commitVersionedBlankLoopPosition(drag)) return true;", block)
+
+    def test_classic_standalone_default_loop_uses_the_versioned_mutation_route(self):
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        block = classic[classic.index("function canUseVersionedBlankLoopDelete(node)"):classic.index("async function deleteNodeFromButton")]
+        self.assertIn("Number(node.count || 3) !== 3", block)
+        self.assertIn("node.mode === 'parallel' || node.showPrompt || node.imageInput || node.videoInput", block)
+        self.assertIn("connections.some(connection => connection.from === node.id || connection.to === node.id)", block)
+        self.assertIn("await window.WorkbenchNodeClient.update(canvas.id, node.id", block)
+        self.assertIn("await window.WorkbenchNodeClient.remove(canvas.id, node.id", block)
+        self.assertIn("if(await commitVersionedBlankLoopPosition(drag)) return true;", block)
+        self.assertIn("if(await commitVersionedBlankOutputPosition(drag)) return true;", block)
+
+    def test_classic_standalone_empty_output_uses_the_versioned_mutation_route(self):
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        block = classic[classic.index("function canUseVersionedBlankOutputDelete(node)"):classic.index("function deleteConnection(id, event){")]
+        self.assertIn("node.type !== 'output'", block)
+        self.assertIn("(node.images || []).length || (node._pending || []).length", block)
+        self.assertIn("Object.keys(node.imageComparisons || {}).length", block)
+        self.assertIn("connections.some(connection => connection.from === node.id || connection.to === node.id)", block)
+        self.assertIn("await window.WorkbenchNodeClient.update(canvas.id, node.id", block)
+        self.assertIn("await window.WorkbenchNodeClient.remove(canvas.id, node.id", block)
+        self.assertIn("if(await commitVersionedBlankOutputPosition(drag)) return true;", block)
+        self.assertIn("return commitVersionedEmptyGroupPosition(drag);", block)
+        self.assertIn("if(await deleteVersionedBlankOutputNode(id)) return;", block)
+
+    def test_classic_standalone_empty_group_uses_the_versioned_mutation_route(self):
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        block = classic[classic.index("function canUseVersionedEmptyGroupDelete(node)"):classic.index("function deleteConnection(id, event){")]
+        self.assertIn("node.type !== 'group' || (node.items || []).length", block)
+        self.assertIn("connections.some(connection => connection.from === node.id || connection.to === node.id)", block)
+        self.assertIn("Array.isArray(candidate.items) && candidate.items.includes(node.id)", block)
+        self.assertIn("await window.WorkbenchNodeClient.update(canvas.id, node.id", block)
+        self.assertIn("await window.WorkbenchNodeClient.remove(canvas.id, node.id", block)
+        self.assertIn("return commitVersionedEmptyGroupPosition(drag);", block)
+        self.assertIn("if(await deleteVersionedEmptyGroupNode(id)) return;", block)
+
+    def test_smart_standalone_blank_image_delete_uses_the_versioned_mutation_route(self):
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        delete_block = smart[smart.index("function canUseVersionedBlankSmartImageDelete(node)"):smart.index("function disconnectConnection(index){")]
+        self.assertIn("node?.type !== 'smart-image'", delete_block)
+        self.assertIn("node.pending || node.queued || node.jimengPending || node.running", delete_block)
+        self.assertIn("smartGroupContainingNode(node.id)", delete_block)
+        self.assertIn("candidate.historyFor === node.id", delete_block)
+        self.assertIn("candidate?.inputNodeIds", delete_block)
+        self.assertIn("await window.WorkbenchNodeClient.remove(canvas.id, node.id", delete_block)
+        self.assertIn("expected_revision:Number(canvas.updated_at || 0)", delete_block)
+        self.assertIn("if(await deleteVersionedBlankSmartImageNode(id)) return;", delete_block)
+        self.assertNotIn("scheduleSave();", delete_block)
+
+    def test_smart_standalone_blank_image_move_uses_the_versioned_mutation_route(self):
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        move_block = smart[smart.index("async function commitVersionedBlankSmartImagePosition(drag)"):smart.index("async function deleteVersionedBlankSmartImageNode(id)")]
+        mouseup = smart[smart.index("window.onmouseup = e => {"):smart.index("shell.addEventListener('wheel'")]
+        self.assertIn("drag?.isLocalCopy || drag?.ctrlGroup || drag?.thumbDetached", move_block)
+        self.assertIn("(drag?.group || []).length !== 1", move_block)
+        self.assertIn("await window.WorkbenchNodeClient.update(canvas.id, node.id", move_block)
+        self.assertIn("position:{x:Number(node.x) || 0, y:Number(node.y) || 0}", move_block)
+        self.assertIn("node.x = drag.ox;", move_block)
+        self.assertIn("node.y = drag.oy;", move_block)
+        self.assertIn("isLocalCopy:Boolean(pointer.altKey)", smart)
+        self.assertIn("void commitVersionedSmartPosition(versionedPositionCommit)", mouseup)
+        self.assertIn("if(!handled) scheduleSave();", mouseup)
+
+    def test_smart_standalone_empty_group_uses_the_versioned_mutation_route(self):
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        block = smart[smart.index("function canUseVersionedEmptySmartGroupDelete(node)"):smart.index("function disconnectConnection(index){")]
+        self.assertIn("(node.items || []).length || (node.images || []).length || (node.inputNodeIds || []).length", block)
+        self.assertIn("(canvas?.connections || []).some", block)
+        self.assertIn("return !smartGroupContainingNode(node.id);", block)
+        self.assertIn("await window.WorkbenchNodeClient.update(canvas.id, node.id", block)
+        self.assertIn("await window.WorkbenchNodeClient.remove(canvas.id, node.id", block)
+        self.assertIn("void commitVersionedSmartPosition(versionedPositionCommit)", smart)
+        self.assertIn("if(await deleteVersionedEmptySmartGroupNode(id)) return;", block)
+
+    def test_smart_standalone_default_loop_uses_the_versioned_mutation_route(self):
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        block = smart[smart.index("function canUseVersionedDefaultSmartLoopDelete(node)"):smart.index("function disconnectConnection(index){")]
+        self.assertIn("Number(node.count || 1) !== 1 || node.mode === 'parallel'", block)
+        self.assertIn("String(node.variablePrompt || '').trim()", block)
+        self.assertIn("await window.WorkbenchNodeClient.update(canvas.id, node.id", block)
+        self.assertIn("await window.WorkbenchNodeClient.remove(canvas.id, node.id", block)
+        self.assertIn("if(await commitVersionedDefaultSmartLoopPosition(drag)) return true;", block)
+        self.assertIn("if(await deleteVersionedDefaultSmartLoopNode(id)) return;", block)
+
+    def test_smart_standalone_blank_prompt_uses_the_versioned_mutation_route(self):
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        block = smart[smart.index("function canUseVersionedBlankSmartPromptDelete(node)"):smart.index("function disconnectConnection(index){")]
+        self.assertIn("node?.type !== 'smart-prompt'", block)
+        self.assertIn("String(node.text || '').trim() || String(node.promptResult || '').trim()", block)
+        self.assertIn("node.llmEnabled || node.llmSystemEnabled", block)
+        self.assertIn("(node.promptAttachments || []).length || (node.inputNodeIds || []).length", block)
+        self.assertIn("(canvas?.connections || []).some", block)
+        self.assertIn("return !smartGroupContainingNode(node.id);", block)
+        self.assertIn("await window.WorkbenchNodeClient.update(canvas.id, node.id", block)
+        self.assertIn("await window.WorkbenchNodeClient.remove(canvas.id, node.id", block)
+        self.assertIn("return commitVersionedBlankSmartPromptPosition(drag);", block)
+        self.assertIn("if(await deleteVersionedBlankSmartPromptNode(id)) return;", block)
+
     def test_node_shell_emits_intents_without_storage_or_network_side_effects(self):
         shell = (ROOT / "static" / "js" / "workbench" / "canvas" / "node-shell.js").read_text(encoding="utf-8")
         self.assertIn("WorkbenchNodeShell", shell)
@@ -1651,14 +2009,18 @@ console.log(JSON.stringify({{
         self.assertIn("mountNodeShellForSmartLegacyNodes();", smart)
         self.assertIn("preserveLegacyContent:true", smart)
         self.assertIn("function adoptLegacyContent(settings)", (ROOT / "static" / "js" / "workbench" / "canvas" / "unified-render-host.js").read_text(encoding="utf-8"))
-        self.assertIn("node && !isSmartImageNode(node) && !isSmartGroupNode(node) && node.type !== 'group'", smart)
+        admission = (ROOT / "static" / "js" / "workbench" / "canvas" / "renderer-admission.js").read_text(encoding="utf-8")
+        self.assertIn("WorkbenchRendererAdmission?.admits", smart)
+        self.assertIn("accepts:candidate => !isSmartImageNode(candidate) && !isSmartGroupNode(candidate) && candidate.type !== 'group'", smart)
+        self.assertIn("function admits(policy, node)", admission)
+        self.assertIn("renderer-admission.js?v=2026.09.06.1", page)
         self.assertIn(".image-node.legacy-renderer-mounted > .floating-node-actions", styles)
-        self.assertIn("smart-canvas.js?v=2026.09.04.9", page)
+        self.assertIn("smart-canvas.js?v=2026.09.06.9", page)
 
     def test_classic_output_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
         styles = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
-        self.assertIn("['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type)", classic)
+        self.assertIn("WorkbenchRendererAdmission?.admits({enabled:canvasLegacyRendererEnabled(), types:['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup']}", classic)
         self.assertIn("if(node?.type === 'output') return {input:true, output:true};", classic)
         self.assertIn(".node.node-shell-mounted.output-node .canvas-node-shell-legacy-content", styles)
         self.assertIn("overflow:auto", styles)
@@ -1672,11 +2034,7 @@ console.log(JSON.stringify({{
         self.assertIn("params.get('node_shell') !== '0'", classic)
         self.assertIn("params.get('legacy_renderer') !== '0'", classic)
         self.assertIn("window.WorkbenchNodeClient?.isLoopback?.()", classic)
-        self.assertIn(
-            "['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', "
-            "'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type)",
-            classic,
-        )
+        self.assertIn("WorkbenchRendererAdmission?.admits({enabled:canvasLegacyRendererEnabled(), types:['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup']}", classic)
         self.assertIn("if(node?.type === 'prompt') return {input:false, output:true};", classic)
         self.assertIn("if(node?.type === 'promptGroup') return {input:false, output:true};", classic)
         for node_type in [node for node in migrated if node not in {"prompt", "promptGroup"}]:
@@ -1685,7 +2043,7 @@ console.log(JSON.stringify({{
     def test_classic_llm_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
         styles = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
-        self.assertIn("['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type)", classic)
+        self.assertIn("WorkbenchRendererAdmission?.admits", classic)
         self.assertIn("if(node?.type === 'llm') return {input:true, output:true};", classic)
         self.assertIn(".node.node-shell-mounted.llm-node .canvas-node-shell-legacy-content", styles)
         self.assertIn(".node.node-shell-mounted.llm-node .llm-body", styles)
@@ -1693,7 +2051,7 @@ console.log(JSON.stringify({{
     def test_classic_generator_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
         styles = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
-        self.assertIn("['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type)", classic)
+        self.assertIn("WorkbenchRendererAdmission?.admits", classic)
         self.assertIn("if(node?.type === 'generator') return {input:true, output:true};", classic)
         self.assertIn(".node.node-shell-mounted.generator-node .canvas-node-shell-legacy-content", styles)
         self.assertIn(".node.node-shell-mounted.generator-node .generator-body", styles)
@@ -1701,7 +2059,7 @@ console.log(JSON.stringify({{
     def test_classic_midjourney_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
         styles = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
-        self.assertIn("['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type)", classic)
+        self.assertIn("WorkbenchRendererAdmission?.admits", classic)
         self.assertIn("if(node?.type === 'midjourney') return {input:true, output:true};", classic)
         self.assertIn(".node.node-shell-mounted.midjourney-node .canvas-node-shell-legacy-content", styles)
         self.assertIn(".node.node-shell-mounted.midjourney-node .generator-body", styles)
@@ -1709,7 +2067,7 @@ console.log(JSON.stringify({{
     def test_classic_modelscope_generation_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
         styles = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
-        self.assertIn("['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type)", classic)
+        self.assertIn("WorkbenchRendererAdmission?.admits", classic)
         self.assertIn("if(node?.type === 'msgen') return {input:true, output:true};", classic)
         self.assertIn(".node.node-shell-mounted.msgen-node .canvas-node-shell-legacy-content", styles)
         self.assertIn(".node.node-shell-mounted.msgen-node .generator-body", styles)
@@ -1717,7 +2075,7 @@ console.log(JSON.stringify({{
     def test_classic_video_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
         styles = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
-        self.assertIn("['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type)", classic)
+        self.assertIn("WorkbenchRendererAdmission?.admits", classic)
         self.assertIn("if(node?.type === 'video') return {input:true, output:true};", classic)
         self.assertIn(".node.node-shell-mounted.video-node .canvas-node-shell-legacy-content", styles)
         self.assertIn(".node.node-shell-mounted.video-node .generator-body", styles)
@@ -1725,7 +2083,7 @@ console.log(JSON.stringify({{
     def test_classic_comfy_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
         styles = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
-        self.assertIn("['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type)", classic)
+        self.assertIn("WorkbenchRendererAdmission?.admits", classic)
         self.assertIn("if(node?.type === 'comfy') return {input:true, output:true};", classic)
         self.assertIn(".node.node-shell-mounted.comfy-node .canvas-node-shell-legacy-content", styles)
         self.assertIn(".node.node-shell-mounted.comfy-node .comfy-body", styles)
@@ -1733,7 +2091,7 @@ console.log(JSON.stringify({{
     def test_classic_runninghub_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
         styles = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
-        self.assertIn("['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type)", classic)
+        self.assertIn("WorkbenchRendererAdmission?.admits", classic)
         self.assertIn("if(node?.type === 'rh') return {input:true, output:true};", classic)
         self.assertIn(".node.node-shell-mounted.rh-node .canvas-node-shell-legacy-content", styles)
         self.assertIn(".node.node-shell-mounted.rh-node .rh-body", styles)
@@ -1741,7 +2099,7 @@ console.log(JSON.stringify({{
     def test_classic_ltx_director_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
         styles = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
-        self.assertIn("['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type)", classic)
+        self.assertIn("WorkbenchRendererAdmission?.admits", classic)
         self.assertIn("if(node?.type === 'ltxDirector') return {input:true, output:true};", classic)
         self.assertIn(".node.node-shell-mounted.ltxDirector-node .canvas-node-shell-legacy-content", styles)
         self.assertIn(".node.node-shell-mounted.ltxDirector-node .ltx-director-body", styles)
@@ -1749,14 +2107,14 @@ console.log(JSON.stringify({{
     def test_classic_minimax_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
         styles = (ROOT / "static" / "css" / "canvas.css").read_text(encoding="utf-8")
-        self.assertIn("['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type)", classic)
+        self.assertIn("WorkbenchRendererAdmission?.admits", classic)
         self.assertIn("if(node?.type === 'minimax') return {input:true, output:true};", classic)
         self.assertIn(".node.node-shell-mounted.minimax-node .workbench-legacy-renderer", styles)
         self.assertIn(".node.node-shell-mounted.minimax-node .minimax-canvas-workbench", styles)
 
     def test_classic_prompt_group_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
-        self.assertIn("['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type)", classic)
+        self.assertIn("WorkbenchRendererAdmission?.admits", classic)
         self.assertIn("if(node?.type === 'promptGroup') return {input:false, output:true};", classic)
         self.assertIn("if(node.type === 'promptGroup') {", classic)
         self.assertIn("${promptNodes.length} ${tr('canvas.promptCount')} ${tr('canvas.grouped')}", classic)
@@ -1907,7 +2265,7 @@ console.log(JSON.stringify({{
         self.assertIn("function canvasLegacyRendererEnabled()", classic)
         self.assertIn("params.get('legacy_renderer') !== '0'", classic)
         self.assertIn("function mountCanvasNodeShellForLegacy", classic)
-        self.assertIn("['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup'].includes(node?.type)", classic)
+        self.assertIn("WorkbenchRendererAdmission?.admits({enabled:canvasLegacyRendererEnabled(), types:['prompt', 'loop', 'output', 'llm', 'generator', 'midjourney', 'msgen', 'video', 'comfy', 'rh', 'ltxDirector', 'minimax', 'promptGroup']}", classic)
         self.assertIn("function canvasLegacyNodeShellPorts(node)", classic)
         self.assertIn("node?.type === 'loop'", classic)
         self.assertIn("if(node?.type === 'loop') return {input:true, output:true};", classic)
@@ -1934,6 +2292,8 @@ console.log(JSON.stringify({{
         self.assertIn("canvasSemanticZoomIndicator", classic)
         self.assertIn("WorkbenchUnifiedRenderHost.mount", classic)
         self.assertIn("handleCanvasNodeShellIntent", classic)
+        self.assertIn("function selectCanvasNodeFromShell(nodeId)", classic)
+        self.assertIn("if(!applyCanvasRuntimeSelection([nodeId]))", classic)
         self.assertIn("startNodeDrag(canvasShellPointer(intent.detail), node)", classic)
         self.assertIn("startNodeResize(canvasShellPointer(intent.detail), node)", classic)
         self.assertIn("startLink(canvasShellPointer(intent.detail)", classic)
@@ -1950,10 +2310,10 @@ console.log(JSON.stringify({{
         self.assertIn(".workbench-node-shell__port--input { left:-25px; }", styles)
         self.assertIn(".workbench-node-shell__port--output { right:-21px; }", styles)
         self.assertIn("canvas.css?v=2026.09.04.1", page)
-        self.assertIn("command-registry.js?v=2026.09.04.5", page)
+        self.assertIn("command-registry.js?v=2026.09.06.6", page)
         self.assertIn("creation-catalog.js?v=2026.09.04.1", page)
         self.assertIn("generation-intent.js?v=2026.09.04.1", page)
-        self.assertIn("canvas.js?v=2026.09.05.2", page)
+        self.assertIn("canvas.js?v=2026.09.06.11", page)
         self.assertIn("WorkbenchUnifiedRenderHost.cardShellView({selected:selected.has(node.id), onIntent:handleCanvasNodeShellIntent})", classic)
         self.assertIn("const canvasNodeShellIntentAdapter = window.WorkbenchUnifiedRenderHost.createIntentAdapter({", classic)
         self.assertIn("delete:intent => deleteNodeFromButton(intent.nodeId)", classic)

@@ -1422,7 +1422,7 @@ function canUseNodeShellForSmartLegacy(node){
     // Media and Smart Group have dedicated adapters. Everything admitted by
     // this seam remains a lossless Legacy DOM payload; this page adapter does
     // not choose a renderer based on an individual node family.
-    return Boolean(enabled && window.WorkbenchNodeClient?.isLoopback?.() && window.WorkbenchNodeShell && window.WorkbenchLegacyRenderer && node && !isSmartImageNode(node) && !isSmartGroupNode(node) && node.type !== 'group');
+    return window.WorkbenchRendererAdmission?.admits({enabled:Boolean(enabled && window.WorkbenchNodeClient?.isLoopback?.() && window.WorkbenchNodeShell && window.WorkbenchLegacyRenderer), accepts:candidate => !isSmartImageNode(candidate) && !isSmartGroupNode(candidate) && candidate.type !== 'group'}, node);
 }
 function canUseMediaRendererForSmartImage(node){
     const enabled = new URLSearchParams(window.location.search).get('media_renderer') !== '0';
@@ -1506,7 +1506,7 @@ function startSmartNodeDrag(nodeId, pointer){
         const item = nodes.find(candidate => candidate.id === dragId);
         return item ? {id:item.id, ox:Number(item.x) || 0, oy:Number(item.y) || 0} : null;
     }).filter(Boolean);
-    dragState = {id:node.id, startX:pointer.clientX, startY:pointer.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(pointer.ctrlKey)};
+    dragState = {id:node.id, startX:pointer.clientX, startY:pointer.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(pointer.ctrlKey), isLocalCopy:Boolean(pointer.altKey)};
     document.body.classList.add('smart-node-drag');
     capturePendingUndo();
 }
@@ -1601,9 +1601,12 @@ async function createVersionedBlankSmartPrompt(x, y){
     const undoSnapshot = snapshotForUndo();
     try {
         const result = await window.WorkbenchNodeClient.create(canvas.id, {request_id:`${smartClientId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, project_id:canvas.project, source:'context_menu', definition_ref:{type:'legacy', id:'smart-prompt', version:'0'}, position:{x,y}, expected_revision:Number(canvas.updated_at || 0), title:'3D动画短片生成器', initial_config:config}, smartClientId);
-        const node = {id:result.node.id, type:'smart-prompt', x, y, w:340, h:286, title:result.node.title || '3D动画短片生成器', ...config, created_at:Date.now()};
-        nodes.push(node); selectedId = node.id; undoStack.push(undoSnapshot); if(undoStack.length > UNDO_LIMIT) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now()); render();
+        const node = window.WorkbenchNodeClient.applyCreationResult(result, {
+            nodes, undoStack, undoSnapshot, undoLimit:UNDO_LIMIT, canvas,
+            projectNode:created => ({id:created.id, type:'smart-prompt', x, y, w:340, h:286, title:created.title || '3D动画短片生成器', ...config, created_at:Date.now()}),
+            onSelected:created => { selectedId = created.id; },
+        });
+        render();
         return node;
     } catch(error) { console.error('Versioned Smart Prompt creation failed', error); toast(tr('smart.toastCanvasFail')); return null; }
 }
@@ -1612,9 +1615,13 @@ async function createVersionedBlankSmartLoop(x, y){
     const undoSnapshot = snapshotForUndo();
     try {
         const result = await window.WorkbenchNodeClient.create(canvas.id, {request_id:`${smartClientId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, project_id:canvas.project, source:'context_menu', definition_ref:{type:'legacy', id:'smart-loop', version:'0'}, position:{x,y}, expected_revision:Number(canvas.updated_at || 0), title:'Loop'}, smartClientId);
-        const node = {id:result.node.id, type:'smart-loop', x, y, w:340, h:168, title:'Loop', count:1, mode:'serial', showPrompt:false, imageInput:false, loopStart:1, imageBatchSize:1, variablePrompt:'', created_at:Date.now()};
-        nodes.push(node); selectedId = node.id; undoStack.push(undoSnapshot); if(undoStack.length > UNDO_LIMIT) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now()); render(); return node;
+        const node = window.WorkbenchNodeClient.applyCreationResult(result, {
+            nodes, undoStack, undoSnapshot, undoLimit:UNDO_LIMIT, canvas,
+            projectNode:created => ({id:created.id, type:'smart-loop', x, y, w:340, h:168, title:created.title || 'Loop', count:1, mode:'serial', showPrompt:false, imageInput:false, loopStart:1, imageBatchSize:1, variablePrompt:'', created_at:Date.now()}),
+            onSelected:created => { selectedId = created.id; },
+        });
+        render();
+        return node;
     } catch(error) { console.error('Versioned Smart Loop creation failed', error); toast(tr('smart.toastCanvasFail')); return null; }
 }
 async function createVersionedBlankSmartGroup(x, y){
@@ -1622,9 +1629,13 @@ async function createVersionedBlankSmartGroup(x, y){
     const undoSnapshot = snapshotForUndo();
     try {
         const result = await window.WorkbenchNodeClient.create(canvas.id, {request_id:`${smartClientId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, project_id:canvas.project, source:'context_menu', definition_ref:{type:'legacy', id:'smart-group', version:'0'}, position:{x,y}, expected_revision:Number(canvas.updated_at || 0), title:'智能分组'}, smartClientId);
-        const node = {id:result.node.id, type:'smart-group', x, y, w:SMART_GROUP_DEFAULT_WIDTH, h:SMART_GROUP_DEFAULT_HEIGHT, title:'智能分组', items:[], created_at:Date.now()};
-        nodes.push(node); selectedId = node.id; undoStack.push(undoSnapshot); if(undoStack.length > UNDO_LIMIT) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now()); render(); return node;
+        const node = window.WorkbenchNodeClient.applyCreationResult(result, {
+            nodes, undoStack, undoSnapshot, undoLimit:UNDO_LIMIT, canvas,
+            projectNode:created => ({id:created.id, type:'smart-group', x, y, w:SMART_GROUP_DEFAULT_WIDTH, h:SMART_GROUP_DEFAULT_HEIGHT, title:created.title || '智能分组', items:[], created_at:Date.now()}),
+            onSelected:created => { selectedId = created.id; },
+        });
+        render();
+        return node;
     } catch(error) { console.error('Versioned Smart Group creation failed', error); toast(tr('smart.toastCanvasFail')); return null; }
 }
 async function createVersionedBlankSmartMinimax(point){
@@ -1639,10 +1650,16 @@ async function createVersionedBlankSmartMinimax(point){
             project_id:canvas.project, source:'context_menu', definition_ref:{type:'legacy', id:'smart-minimax', version:'0'},
             position:{x,y}, expected_revision:Number(canvas.updated_at || 0), title:'MiniMax H3',
         }, smartClientId);
-        const node = {id:result.node.id, type:'smart-minimax', x, y, w:1040, h:640, title:result.node.title || 'MiniMax H3', workflow:'MiniMax_H3.json', minimaxEngine:SMART_MINIMAX_DEFAULT_ENGINE, minimaxRunningHubWorkflowId:'', duration, aspectRatio:'16:9 (Widescreen)', megapixels:0.4, promptDraftText:'', refs:{image:[], video:[], audio:[]}, materials:[], segments:[{id:uid('seg'), start:0, duration, prompt:'', refs:{image:[], video:[], audio:[]}, refItems:[], trimIn:0, trimOut:duration, result:null, results:[]}], selectedSegmentId:'', playhead:0, timelineZoom:1, minimaxPreviewH:190, minimaxVideoTrackH:70, minimaxRefLaneH:42, minimaxMuted:false, timelinePlaying:false, running:false, created_at:Date.now()};
-        smartMinimaxEnsureSegment(node);
-        nodes.push(node); selectedId = node.id; undoStack.push(undoSnapshot); if(undoStack.length > UNDO_LIMIT) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now()); render();
+        const node = window.WorkbenchNodeClient.applyCreationResult(result, {
+            nodes, undoStack, undoSnapshot, undoLimit:UNDO_LIMIT, canvas,
+            projectNode:created => {
+                const projected = {id:created.id, type:'smart-minimax', x, y, w:1040, h:640, title:created.title || 'MiniMax H3', workflow:'MiniMax_H3.json', minimaxEngine:SMART_MINIMAX_DEFAULT_ENGINE, minimaxRunningHubWorkflowId:'', duration, aspectRatio:'16:9 (Widescreen)', megapixels:0.4, promptDraftText:'', refs:{image:[], video:[], audio:[]}, materials:[], segments:[{id:uid('seg'), start:0, duration, prompt:'', refs:{image:[], video:[], audio:[]}, refItems:[], trimIn:0, trimOut:duration, result:null, results:[]}], selectedSegmentId:'', playhead:0, timelineZoom:1, minimaxPreviewH:190, minimaxVideoTrackH:70, minimaxRefLaneH:42, minimaxMuted:false, timelinePlaying:false, running:false, created_at:Date.now()};
+                smartMinimaxEnsureSegment(projected);
+                return projected;
+            },
+            onSelected:created => { selectedId = created.id; },
+        });
+        render();
         return node;
     } catch(error) { console.error('Versioned Smart MiniMax creation failed', error); toast(tr('smart.toastCanvasFail')); return null; }
 }
@@ -1676,26 +1693,16 @@ function applyVersionedSmartConnectedNode(result, node, state, undoSnapshot){
     const fromExisting = state?.fromPort === 'out';
     const fromId = fromExisting ? state.fromId : node.id;
     const toId = fromExisting ? node.id : state.fromId;
-    // The new node is the connection target when dragging from an existing
-    // output port. Make it visible to the local graph before resolving the
-    // target, otherwise a successful atomic server transaction is reported as
-    // a client-side "target unavailable" failure.
-    nodes.push(node);
-    const target = nodes.find(item => item.id === toId);
-    if(!target) {
-        nodes.pop();
-        throw new Error('The existing connection target is unavailable.');
-    }
-    target.inputNodeIds = Array.from(new Set([...(target.inputNodeIds || []), fromId]));
     canvas.connections = canvas.connections || [];
-    canvas.connections.push({id:result.edge.id, from:fromId, to:toId, kind:'input'});
-    selectedId = node.id;
-    undoStack.push(undoSnapshot);
-    if(undoStack.length > UNDO_LIMIT) undoStack.shift();
-    canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+    const created = window.WorkbenchNodeClient.applyGraphCreationResult(result, {
+        nodes, connections:canvas.connections, undoStack, undoSnapshot, undoLimit:UNDO_LIMIT, canvas,
+        projectNode:() => node,
+        projectEdge:edge => ({id:edge.id, from:fromId, to:toId, kind:'input'}),
+        syncTargetInput:true,
+        onSelected:createdNode => { selectedId = createdNode.id; },
+    });
     render();
-    scheduleSave();
-    return node;
+    return created;
 }
 async function createVersionedConnectedSmartPrompt(point, state){
     if(!canUseVersionedSmartImageCreation()) return null;
@@ -1790,13 +1797,15 @@ async function createVersionedBlankSmartImageAt(point){
             definition_ref:{type:'legacy', id:'image', version:'0'},
             position:{x, y}, expected_revision:Number(canvas.updated_at || 0), title:tr('smart.createImportNode'),
         }, smartClientId);
-        const node = {id:result.node.id, type:'smart-image', x, y, title:result.node.title, images:[], created_at:Date.now()};
-        node.scale = mediaNodeDefaultScale(node);
-        nodes.push(node);
-        undoStack.push(undoSnapshot);
-        if(undoStack.length > UNDO_LIMIT) undoStack.shift();
-        selectedId = node.id;
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        const node = window.WorkbenchNodeClient.applyCreationResult(result, {
+            nodes, undoStack, undoSnapshot, undoLimit:UNDO_LIMIT, canvas,
+            projectNode:created => {
+                const projected = {id:created.id, type:'smart-image', x, y, title:created.title, images:[], created_at:Date.now()};
+                projected.scale = mediaNodeDefaultScale(projected);
+                return projected;
+            },
+            onSelected:created => { selectedId = created.id; selectedIds = []; },
+        });
         render();
         return node;
     } catch(error) {
@@ -2790,14 +2799,25 @@ function minimapEventToWorld(event){
     const rect = minimapContent.getBoundingClientRect();
     const mx = event.clientX - rect.left;
     const my = event.clientY - rect.top;
+    const sharedPoint = smartUnifiedRuntimeEnabled
+        ? window.WorkbenchCanvasRuntime?.worldPointFromMinimapPointer?.({x:event.clientX, y:event.clientY}, {
+            screenOrigin:{x:rect.left, y:rect.top}, worldOrigin:{x:state.minX, y:state.minY}, offset:{x:state.offsetX, y:state.offsetY}, scale:state.scale,
+        })
+        : null;
+    if(sharedPoint) return sharedPoint;
     return {
         x:state.minX + (mx - state.offsetX) / Math.max(0.0001, state.scale),
         y:state.minY + (my - state.offsetY) / Math.max(0.0001, state.scale)
     };
 }
 function centerViewportOnWorldPoint(point){
-    viewport.x = shell.clientWidth / 2 - point.x * viewport.scale;
-    viewport.y = shell.clientHeight / 2 - point.y * viewport.scale;
+    const sharedViewport = smartUnifiedRuntimeEnabled
+        ? window.WorkbenchCanvasRuntime?.viewportCenteredOnWorldPoint?.(viewport, point, {width:shell.clientWidth, height:shell.clientHeight})
+        : null;
+    if(!sharedViewport || !applySmartRuntimeViewport({type:window.WorkbenchCanvasRuntime.COMMANDS.VIEWPORT_SET, viewport:sharedViewport})){
+        viewport.x = shell.clientWidth / 2 - point.x * viewport.scale;
+        viewport.y = shell.clientHeight / 2 - point.y * viewport.scale;
+    }
     applyViewport();
     scheduleSave();
 }
@@ -2827,7 +2847,8 @@ function fittedSmartViewport(targetNodes){
     };
 }
 function fitAllNodesViewport(){
-    viewport = fittedSmartViewport(nodes);
+    const fitted = fittedSmartViewport(nodes);
+    if(!applySmartRuntimeViewport({type:window.WorkbenchCanvasRuntime.COMMANDS.VIEWPORT_SET, viewport:fitted})) viewport = fitted;
     applyViewport();
     scheduleSave();
 }
@@ -2846,12 +2867,14 @@ function recoverSmartViewportIfCorrupt(){
     // by preferring the ordinary coordinate cluster already present on canvas.
     const ordinaryNodes = ordinarySmartViewportNodes();
     if(!ordinaryNodes.length) return false;
-    viewport = fittedSmartViewport(ordinaryNodes);
+    const fitted = fittedSmartViewport(ordinaryNodes);
+    if(!applySmartRuntimeViewport({type:window.WorkbenchCanvasRuntime.COMMANDS.VIEWPORT_SET, viewport:fitted})) viewport = fitted;
     return true;
 }
 function restoreSmartViewportToVisibleNodes(){
     const ordinaryNodes = ordinarySmartViewportNodes();
-    viewport = fittedSmartViewport(ordinaryNodes.length ? ordinaryNodes : nodes);
+    const fitted = fittedSmartViewport(ordinaryNodes.length ? ordinaryNodes : nodes);
+    if(!applySmartRuntimeViewport({type:window.WorkbenchCanvasRuntime.COMMANDS.VIEWPORT_SET, viewport:fitted})) viewport = fitted;
     applyViewport();
     scheduleSave();
     toast('已定位可见节点');
@@ -2868,14 +2891,13 @@ function exitZoomPreview(point=null){
     const prev = zoomPreviewState;
     zoomPreviewState = null;
     shell.classList.remove('zoom-preview');
-    viewport.scale = prev.scale;
+    let restoredViewport = {x:prev.x, y:prev.y, scale:prev.scale};
     if(point){
-        viewport.x = shell.clientWidth / 2 - point.x * viewport.scale;
-        viewport.y = shell.clientHeight / 2 - point.y * viewport.scale;
-    } else {
-        viewport.x = prev.x;
-        viewport.y = prev.y;
+        restoredViewport = (smartUnifiedRuntimeEnabled
+            ? window.WorkbenchCanvasRuntime?.viewportCenteredOnWorldPoint?.(restoredViewport, point, {width:shell.clientWidth, height:shell.clientHeight})
+            : null) || {x:shell.clientWidth / 2 - point.x * prev.scale, y:shell.clientHeight / 2 - point.y * prev.scale, scale:prev.scale};
     }
+    if(!applySmartRuntimeViewport({type:window.WorkbenchCanvasRuntime.COMMANDS.VIEWPORT_SET, viewport:restoredViewport})) viewport = restoredViewport;
     applyViewport();
     scheduleSave();
     return true;
@@ -2898,9 +2920,11 @@ function exitZoomPreviewToNode(nodeId){
     const readableScale = Math.min(ZOOM_PREVIEW_NODE_MAX_SCALE, Math.max(ZOOM_PREVIEW_NODE_DEFAULT_SCALE, fitScale));
     zoomPreviewState = null;
     shell.classList.remove('zoom-preview');
-    viewport.scale = Math.max(safeScale(prev.scale), readableScale);
-    viewport.x = shell.clientWidth / 2 - cx * viewport.scale;
-    viewport.y = shell.clientHeight / 2 - cy * viewport.scale;
+    const targetScale = Math.max(safeScale(prev.scale), readableScale);
+    const targetViewport = (smartUnifiedRuntimeEnabled
+        ? window.WorkbenchCanvasRuntime?.viewportCenteredOnWorldPoint?.({...prev, scale:targetScale}, {x:cx, y:cy}, {width:shell.clientWidth, height:shell.clientHeight})
+        : null) || {x:shell.clientWidth / 2 - cx * targetScale, y:shell.clientHeight / 2 - cy * targetScale, scale:targetScale};
+    if(!applySmartRuntimeViewport({type:window.WorkbenchCanvasRuntime.COMMANDS.VIEWPORT_SET, viewport:targetViewport})) viewport = targetViewport;
     applyViewport();
     scheduleSave();
     return true;
@@ -10270,8 +10294,7 @@ function bindNodeEvents(){
             el.ondblclick = e => {
                 e.preventDefault();
                 e.stopPropagation();
-                selectedId = id;
-                selectedIds = [];
+                applySmartNodeSelection(id);
                 selectedImage = {nodeId:'', index:-1};
                 openCreateMenu(e, {groupId:id});
             };
@@ -10301,8 +10324,7 @@ function bindNodeEvents(){
         nodeDrop?.addEventListener('click', e => {
             e.preventDefault(); e.stopPropagation();
             hideRunTimerForNode(nodes.find(n => n.id === id));
-            selectedId = id;
-            selectedIds = [];
+            applySmartNodeSelection(id);
             selectedImage = {nodeId:'', index:-1};
             pendingGroupUploadPoint = null;
             uploadTargetId = id;
@@ -10429,8 +10451,7 @@ function bindNodeEvents(){
                     smartActivateVideoPreview(item);
                     return;
                 }
-                selectedId = id;
-                selectedIds = [];
+                applySmartNodeSelection(id);
                 selectedImage = {nodeId:target.targetNodeId, index:target.imageIndex};
                 openImagePreviewSmart(target.targetNodeId, target.imageIndex);
             }, true);
@@ -10453,8 +10474,7 @@ function bindNodeEvents(){
                 if(e.detail >= 2){
                     clearImageClickTimer();
                     suppressImageClickUntil = Date.now() + 260;
-                    selectedId = id;
-                    selectedIds = [];
+                    applySmartNodeSelection(id);
                     selectedImage = {nodeId:target.targetNodeId, index:target.imageIndex};
                     openImagePreviewSmart(target.targetNodeId, target.imageIndex);
                     return;
@@ -10463,8 +10483,7 @@ function bindNodeEvents(){
                 imageClickTimer = setTimeout(() => {
                     imageClickTimer = null;
                 hideRunTimerForNode(owner);
-                selectedId = id;
-                selectedIds = [];
+                applySmartNodeSelection(id);
                 // Composer 绑定节点本身；这里记录图层焦点，用于交叠时置顶和工具栏目标。
                 selectedImage = {nodeId:target.targetNodeId, index:target.imageIndex};
                     if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
@@ -10485,8 +10504,7 @@ function bindNodeEvents(){
                 smartActivateVideoPreview(item);
                 return;
             }
-            selectedId = id;
-            selectedIds = [];
+            applySmartNodeSelection(id);
             selectedImage = {nodeId:target.targetNodeId, index:target.imageIndex};
             openImagePreviewSmart(target.targetNodeId, target.imageIndex);
         }, true);
@@ -10646,8 +10664,212 @@ function clearNodeMediaBeforeDelete(id){
     scheduleSave();
     return true;
 }
-function deleteNodeFromButton(id){
+function canUseVersionedBlankSmartImageDelete(node){
+    if(!canUseVersionedSmartImageCreation() || node?.type !== 'smart-image') return false;
+    if((node.images || []).length || node.pending || node.queued || node.jimengPending || node.running) return false;
+    if(smartGroupContainingNode(node.id)) return false;
+    const hasHistory = nodes.some(candidate => isHistoryGroupNode(candidate)
+        && candidate.historyFor === node.id && hasHistoryConnection(node.id, candidate.id));
+    if(hasHistory) return false;
+    return !nodes.some(candidate => Array.isArray(candidate?.inputNodeIds) && candidate.inputNodeIds.includes(node.id));
+}
+function canUseVersionedEmptySmartGroupDelete(node){
+    if(!canUseVersionedSmartImageCreation() || !isSmartGroupNode(node)) return false;
+    if((node.items || []).length || (node.images || []).length || (node.inputNodeIds || []).length) return false;
+    if((canvas?.connections || []).some(connection => connection.from === node.id || connection.to === node.id)) return false;
+    return !smartGroupContainingNode(node.id);
+}
+function canUseVersionedDefaultSmartLoopDelete(node){
+    if(!canUseVersionedSmartImageCreation() || node?.type !== 'smart-loop') return false;
+    if(Number(node.count || 1) !== 1 || node.mode === 'parallel' || node.showPrompt || node.imageInput) return false;
+    if(Number(node.loopStart || 1) !== 1 || Number(node.imageBatchSize || 1) !== 1) return false;
+    if(String(node.variablePrompt || '').trim() || (node.variablePrompts || []).some(value => String(value || '').trim())) return false;
+    if((node.inputNodeIds || []).length || (canvas?.connections || []).some(connection => connection.from === node.id || connection.to === node.id)) return false;
+    return !smartGroupContainingNode(node.id);
+}
+function canUseVersionedBlankSmartPromptDelete(node){
+    if(!canUseVersionedSmartImageCreation() || node?.type !== 'smart-prompt') return false;
+    if(String(node.text || '').trim() || String(node.promptResult || '').trim() || node.promptResultOutdated) return false;
+    if(node.llmEnabled || node.llmSystemEnabled || String(node.llmInstruction || '').trim()) return false;
+    if((node.promptAttachments || []).length || (node.inputNodeIds || []).length) return false;
+    if((canvas?.connections || []).some(connection => connection.from === node.id || connection.to === node.id)) return false;
+    return !smartGroupContainingNode(node.id);
+}
+async function commitVersionedBlankSmartImagePosition(drag){
+    const node = nodes.find(candidate => candidate.id === drag?.id);
+    const changed = Number(node?.x) !== Number(drag?.ox) || Number(node?.y) !== Number(drag?.oy);
+    if(drag?.isLocalCopy || drag?.ctrlGroup || drag?.thumbDetached || (drag?.group || []).length !== 1 || !changed || !canUseVersionedBlankSmartImageDelete(node)) return false;
+    try {
+        const result = await window.WorkbenchNodeClient.update(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(canvas.updated_at || 0),
+            position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
+        }, smartClientId);
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        applySmartRuntimeNodeMove(node);
+    } catch(error) {
+        // A canonical expected-revision write must restore the optimistic move
+        // instead of issuing a raw full-Canvas save on stale/rejected writes.
+        console.error('Versioned Smart blank Image position update failed', error);
+        node.x = drag.ox;
+        node.y = drag.oy;
+        applySmartRuntimeNodeMove(node);
+        render();
+        toast(tr('smart.toastCanvasFail'));
+    }
+    return true;
+}
+async function commitVersionedEmptySmartGroupPosition(drag){
+    const node = nodes.find(candidate => candidate.id === drag?.id);
+    const changed = Number(node?.x) !== Number(drag?.ox) || Number(node?.y) !== Number(drag?.oy);
+    if(drag?.isLocalCopy || drag?.ctrlGroup || drag?.thumbDetached || (drag?.group || []).length !== 1 || !changed || !canUseVersionedEmptySmartGroupDelete(node)) return false;
+    try {
+        const result = await window.WorkbenchNodeClient.update(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(canvas.updated_at || 0),
+            position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
+        }, smartClientId);
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        applySmartRuntimeNodeMove(node);
+    } catch(error) {
+        console.error('Versioned empty Smart Group position update failed', error);
+        node.x = drag.ox;
+        node.y = drag.oy;
+        applySmartRuntimeNodeMove(node);
+        render();
+        toast(tr('smart.toastCanvasFail'));
+    }
+    return true;
+}
+async function commitVersionedDefaultSmartLoopPosition(drag){
+    const node = nodes.find(candidate => candidate.id === drag?.id);
+    const changed = Number(node?.x) !== Number(drag?.ox) || Number(node?.y) !== Number(drag?.oy);
+    if(drag?.isLocalCopy || drag?.ctrlGroup || drag?.thumbDetached || (drag?.group || []).length !== 1 || !changed || !canUseVersionedDefaultSmartLoopDelete(node)) return false;
+    try {
+        const result = await window.WorkbenchNodeClient.update(canvas.id, node.id, {project_id:canvas.project, expected_revision:Number(canvas.updated_at || 0), position:{x:Number(node.x) || 0, y:Number(node.y) || 0}}, smartClientId);
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        applySmartRuntimeNodeMove(node);
+    } catch(error) {
+        console.error('Versioned default Smart Loop position update failed', error);
+        node.x = drag.ox; node.y = drag.oy; applySmartRuntimeNodeMove(node); render(); toast(tr('smart.toastCanvasFail'));
+    }
+    return true;
+}
+async function commitVersionedBlankSmartPromptPosition(drag){
+    const node = nodes.find(candidate => candidate.id === drag?.id);
+    const changed = Number(node?.x) !== Number(drag?.ox) || Number(node?.y) !== Number(drag?.oy);
+    if(drag?.isLocalCopy || drag?.ctrlGroup || drag?.thumbDetached || (drag?.group || []).length !== 1 || !changed || !canUseVersionedBlankSmartPromptDelete(node)) return false;
+    try {
+        const result = await window.WorkbenchNodeClient.update(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(canvas.updated_at || 0),
+            position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
+        }, smartClientId);
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        applySmartRuntimeNodeMove(node);
+    } catch(error) {
+        console.error('Versioned blank Smart Prompt position update failed', error);
+        node.x = drag.ox;
+        node.y = drag.oy;
+        applySmartRuntimeNodeMove(node);
+        render();
+        toast(tr('smart.toastCanvasFail'));
+    }
+    return true;
+}
+async function commitVersionedSmartPosition(drag){
+    if(await commitVersionedBlankSmartImagePosition(drag)) return true;
+    if(await commitVersionedEmptySmartGroupPosition(drag)) return true;
+    if(await commitVersionedDefaultSmartLoopPosition(drag)) return true;
+    return commitVersionedBlankSmartPromptPosition(drag);
+}
+async function deleteVersionedBlankSmartImageNode(id){
+    const node = nodes.find(candidate => candidate.id === id);
+    if(!canUseVersionedBlankSmartImageDelete(node)) return false;
+    const undoSnapshot = snapshotForUndo();
+    try {
+        const result = await window.WorkbenchNodeClient.remove(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(canvas.updated_at || 0),
+        }, smartClientId);
+        nodes = nodes.filter(candidate => candidate.id !== node.id);
+        if(canvas) canvas.connections = (canvas.connections || []).filter(connection => connection.from !== node.id && connection.to !== node.id);
+        if(selectedId === node.id) selectedId = '';
+        selectedIds = selectedIds.filter(selected => selected !== node.id);
+        if(selectedImage.nodeId === node.id) selectedImage = {nodeId:'', index:-1};
+        undoStack.push(undoSnapshot);
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || 0);
+        render();
+    } catch(error) {
+        console.error('Versioned Smart Image deletion failed', error);
+        toast(tr('smart.toastCanvasFail'));
+    }
+    return true;
+}
+async function deleteVersionedEmptySmartGroupNode(id){
+    const node = nodes.find(candidate => candidate.id === id);
+    if(!canUseVersionedEmptySmartGroupDelete(node)) return false;
+    const undoSnapshot = snapshotForUndo();
+    try {
+        const result = await window.WorkbenchNodeClient.remove(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(canvas.updated_at || 0),
+        }, smartClientId);
+        nodes = nodes.filter(candidate => candidate.id !== node.id);
+        if(canvas) canvas.connections = (canvas.connections || []).filter(connection => connection.from !== node.id && connection.to !== node.id);
+        if(selectedId === node.id) selectedId = '';
+        selectedIds = selectedIds.filter(selected => selected !== node.id);
+        undoStack.push(undoSnapshot);
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || 0);
+        render();
+    } catch(error) {
+        console.error('Versioned empty Smart Group deletion failed', error);
+        toast(tr('smart.toastCanvasFail'));
+    }
+    return true;
+}
+async function deleteVersionedDefaultSmartLoopNode(id){
+    const node = nodes.find(candidate => candidate.id === id);
+    if(!canUseVersionedDefaultSmartLoopDelete(node)) return false;
+    const undoSnapshot = snapshotForUndo();
+    try {
+        const result = await window.WorkbenchNodeClient.remove(canvas.id, node.id, {project_id:canvas.project, expected_revision:Number(canvas.updated_at || 0)}, smartClientId);
+        nodes = nodes.filter(candidate => candidate.id !== node.id);
+        if(canvas) canvas.connections = (canvas.connections || []).filter(connection => connection.from !== node.id && connection.to !== node.id);
+        if(selectedId === node.id) selectedId = '';
+        selectedIds = selectedIds.filter(selected => selected !== node.id);
+        undoStack.push(undoSnapshot); canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || 0); render();
+    } catch(error) { console.error('Versioned default Smart Loop deletion failed', error); toast(tr('smart.toastCanvasFail')); }
+    return true;
+}
+async function deleteVersionedBlankSmartPromptNode(id){
+    const node = nodes.find(candidate => candidate.id === id);
+    if(!canUseVersionedBlankSmartPromptDelete(node)) return false;
+    const undoSnapshot = snapshotForUndo();
+    try {
+        const result = await window.WorkbenchNodeClient.remove(canvas.id, node.id, {
+            project_id:canvas.project,
+            expected_revision:Number(canvas.updated_at || 0),
+        }, smartClientId);
+        nodes = nodes.filter(candidate => candidate.id !== node.id);
+        if(canvas) canvas.connections = (canvas.connections || []).filter(connection => connection.from !== node.id && connection.to !== node.id);
+        if(selectedId === node.id) selectedId = '';
+        selectedIds = selectedIds.filter(selected => selected !== node.id);
+        undoStack.push(undoSnapshot);
+        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || 0);
+        render();
+    } catch(error) {
+        console.error('Versioned blank Smart Prompt deletion failed', error);
+        toast(tr('smart.toastCanvasFail'));
+    }
+    return true;
+}
+async function deleteNodeFromButton(id){
     if(clearNodeMediaBeforeDelete(id)) return;
+    if(await deleteVersionedBlankSmartImageNode(id)) return;
+    if(await deleteVersionedEmptySmartGroupNode(id)) return;
+    if(await deleteVersionedDefaultSmartLoopNode(id)) return;
+    if(await deleteVersionedBlankSmartPromptNode(id)) return;
     deleteNode(id);
 }
 function disconnectConnection(index){
@@ -13938,31 +14160,13 @@ function isSupportedUploadFile(file){
         || /\.(png|jpe?g|webp|gif|mp4|webm|mov|m4v|mp3|wav|m4a|aac|ogg|flac)(\?|$)/.test(name);
 }
 function dataTransferItemEntry(item){
-    try { return item?.webkitGetAsEntry?.() || null; } catch { return null; }
+    return window.WorkbenchCanvasMediaDrop.entryForItem(item);
 }
 async function filesFromEntry(entry){
-    if(!entry) return [];
-    if(entry.isFile){
-        return new Promise(resolve => entry.file(file => resolve(file ? [file] : []), () => resolve([])));
-    }
-    if(!entry.isDirectory) return [];
-    const reader = entry.createReader();
-    const children = [];
-    while(true){
-        const batch = await new Promise(resolve => reader.readEntries(resolve, () => resolve([])));
-        if(!batch.length) break;
-        children.push(...batch);
-    }
-    const nested = await Promise.all(children.map(filesFromEntry));
-    return nested.flat();
+    return window.WorkbenchCanvasMediaDrop.filesFromEntry(entry);
 }
 async function uploadFilesFromDataTransfer(dataTransfer){
-    const items = [...(dataTransfer?.items || [])];
-    const entries = items.map(dataTransferItemEntry).filter(Boolean);
-    const raw = entries.length
-        ? (await Promise.all(entries.map(filesFromEntry))).flat()
-        : [...(dataTransfer?.files || [])];
-    return raw.filter(isSupportedUploadFile);
+    return window.WorkbenchCanvasMediaDrop.filesFromDataTransfer(dataTransfer, isSupportedUploadFile);
 }
 function uploadTitleForItems(items, fallback='Upload'){
     const list = [...(items || [])];
@@ -14000,42 +14204,8 @@ function smartDropDataTypes(dataTransfer){
 function readSmartDropData(dataTransfer, type){
     try { return dataTransfer?.getData?.(type) || ''; } catch(_) { return ''; }
 }
-function decodeSmartDropText(value){
-    const text = String(value || '').trim();
-    if(!text) return '';
-    try { return decodeURIComponent(text); } catch(_) { return text; }
-}
-function smartDropTextFragments(value){
-    const text = String(value || '').trim();
-    if(!text) return [];
-    const fragments = [];
-    if(/<img|<a\s/i.test(text)){
-        const doc = new DOMParser().parseFromString(text, 'text/html');
-        doc.querySelectorAll('img[src],a[href]').forEach(el => fragments.push(el.getAttribute('src') || el.getAttribute('href') || ''));
-    }
-    text.split(/\r?\n/).forEach(line => {
-        const item = line.trim();
-        if(item) fragments.push(item);
-    });
-    const downloadUrl = text.match(/^image\/[^\s:]+:(.+)$/i);
-    if(downloadUrl) fragments.push(downloadUrl[1]);
-    return fragments;
-}
-function uniqueSmartDropValues(values){
-    const seen = new Set();
-    return values.filter(value => {
-        const key = String(value || '').trim();
-        if(!key || seen.has(key)) return false;
-        seen.add(key);
-        return true;
-    });
-}
 function smartDropTextCandidates(dataTransfer){
-    if(!dataTransfer) return [];
-    const types = uniqueSmartDropValues([...SMART_IMAGE_DROP_TEXT_TYPES, ...smartDropDataTypes(dataTransfer)]);
-    const values = types.map(type => readSmartDropData(dataTransfer, type)).filter(Boolean);
-    return uniqueSmartDropValues(values.flatMap(smartDropTextFragments).map(decodeSmartDropText))
-        .filter(s => s && !s.startsWith('#'));
+    return window.WorkbenchCanvasMediaDrop.textCandidates(dataTransfer, SMART_IMAGE_DROP_TEXT_TYPES);
 }
 function isRemoteSmartImageDropValue(value){
     const text = String(value || '').trim();
@@ -14060,9 +14230,6 @@ function isLocalSmartImageDropValue(value){
     const isPosixPath = clean.startsWith('/');
     return (isWindowsPath || isPosixPath) && SMART_IMAGE_DROP_EXT_RE.test(clean);
 }
-function smartLocalImagePathsFromDataTransfer(dataTransfer){
-    return uniqueSmartDropValues(smartDropTextCandidates(dataTransfer).filter(isLocalSmartImageDropValue));
-}
 function smartImageNameFromUrl(url){
     try {
         const clean = String(url || '').split('?', 1)[0].split('#', 1)[0];
@@ -14072,19 +14239,20 @@ function smartImageNameFromUrl(url){
     }
 }
 function smartImageDropPayload(dataTransfer){
-    const files = smartImageFilesFromDataTransfer(dataTransfer);
-    if(files.length) return {type:'files', files};
-    const localPaths = smartLocalImagePathsFromDataTransfer(dataTransfer);
-    if(localPaths.length) return {type:'localPaths', localPaths};
-    const url = smartDropTextCandidates(dataTransfer).find(isRemoteSmartImageDropValue) || '';
-    if(url) return {type:'url', url};
-    return {type:'none'};
+    return window.WorkbenchCanvasMediaDrop.payload(dataTransfer, {
+        textTypes:SMART_IMAGE_DROP_TEXT_TYPES,
+        isSupportedFile:isSupportedUploadFile,
+        isLocalValue:isLocalSmartImageDropValue,
+        isRemoteValue:isRemoteSmartImageDropValue,
+    });
 }
 async function resolveSmartImageDropPayload(dataTransfer){
-    const payload = smartImageDropPayload(dataTransfer);
-    if(payload.type !== 'none') return payload;
-    const files = await uploadFilesFromDataTransfer(dataTransfer);
-    return files.length ? {type:'files', files} : payload;
+    return window.WorkbenchCanvasMediaDrop.resolvePayload(dataTransfer, {
+        textTypes:SMART_IMAGE_DROP_TEXT_TYPES,
+        isSupportedFile:isSupportedUploadFile,
+        isLocalValue:isLocalSmartImageDropValue,
+        isRemoteValue:isRemoteSmartImageDropValue,
+    });
 }
 function hasSmartImageDropData(dataTransfer){
     if(!dataTransfer) return false;
@@ -14112,13 +14280,12 @@ function setSmartDropCopyEffect(e, includeAsset=false){
 async function uploadFiles(files){
     const supported = [...(files || [])].filter(isSupportedUploadFile).slice(0, SMART_UPLOAD_MAX);
     if(!supported.length) return [];
-    const form = new FormData();
-    supported.forEach(file => form.append('files', file, file.name || 'media'));
-    const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(async r => {
-        if(!r.ok) throw new Error((await r.text()) || tr('smart.toastUploadFail'));
-        return r.json();
+    const uploaded = await window.WorkbenchCanvasMediaDrop.uploadFiles(supported, {
+        fileName:file => file.name || 'media',
+        rejectOnError:true,
+        errorMessage:async response => (await response.text()) || tr('smart.toastUploadFail'),
     });
-    return (data.files || []).map((file, index) => ({
+    return uploaded.map((file, index) => ({
         ...file,
         kind:file.kind || mediaKindForFile(supported[index])
     }));
@@ -17890,11 +18057,17 @@ function finishSelection(event){
     const b = screenToWorld(event);
     const minX = Math.min(a.x, b.x), minY = Math.min(a.y, b.y);
     const maxX = Math.max(a.x, b.x), maxY = Math.max(a.y, b.y);
-    selectedIds = nodes.filter(node => {
+    const nextSelectedIds = nodes.filter(node => {
         const r = nodeRect(node);
         return r.x < maxX && r.x + r.width > minX && r.y < maxY && r.y + r.height > minY;
     }).map(n => n.id);
-    selectedId = selectedIds.length === 1 ? selectedIds[0] : '';
+    // Keep Smart's world-space overlap policy, but commit the result through
+    // the shared runtime on the default path. Direct adapter state is only
+    // retained for the explicit U7 rollback.
+    if(!applySmartRuntimeSelection(nextSelectedIds)) {
+        selectedId = nextSelectedIds.length === 1 ? nextSelectedIds[0] : '';
+        selectedIds = nextSelectedIds.length > 1 ? nextSelectedIds : [];
+    }
     selectedImage = {nodeId:'', index:-1};
     selectionState = null;
     selectionJustFinished = true;
@@ -18269,7 +18442,10 @@ shell.onmousedown = e => {
     if(e.button !== 0 && e.button !== 1) return;
     e.preventDefault();
     didPan = false;
-    panState = {button:e.button, startX:e.clientX, startY:e.clientY, ox:viewport.x, oy:viewport.y};
+    const panSession = smartUnifiedRuntimeEnabled
+        ? window.WorkbenchCanvasRuntime?.createViewportPanSession?.({start:{x:e.clientX, y:e.clientY}, viewport, threshold:3, metric:'manhattan'})
+        : null;
+    panState = {button:e.button, startX:e.clientX, startY:e.clientY, ox:viewport.x, oy:viewport.y, panSession};
     shell.classList.add('panning');
 };
 shell.oncontextmenu = e => {
@@ -18284,8 +18460,7 @@ shell.oncontextmenu = e => {
     e.stopPropagation();
     const groupEl = e.target.closest('.image-node.smart-group-node');
     if(groupEl?.dataset?.id){
-        selectedId = groupEl.dataset.id;
-        selectedIds = [];
+        applySmartNodeSelection(groupEl.dataset.id);
         selectedImage = {nodeId:'', index:-1};
         openCreateMenu(e, {groupId:groupEl.dataset.id});
         return;
@@ -18575,8 +18750,9 @@ window.onmousemove = e => {
     if(panState){
         const dx = e.clientX - panState.startX;
         const dy = e.clientY - panState.startY;
-        if(Math.abs(dx) + Math.abs(dy) > 3) didPan = true;
-        const nextViewport = {x:panState.ox + dx, y:panState.oy + dy, scale:viewport.scale};
+        const pan = panState.panSession?.move({x:e.clientX, y:e.clientY});
+        if(pan?.moved || !pan && Math.abs(dx) + Math.abs(dy) > 3) didPan = true;
+        const nextViewport = pan?.viewport || {x:panState.ox + dx, y:panState.oy + dy, scale:viewport.scale};
         if(!applySmartRuntimeViewport({type:window.WorkbenchCanvasRuntime?.COMMANDS.VIEWPORT_SET, viewport:nextViewport})) viewport = nextViewport;
         applyViewport();
         return;
@@ -18793,8 +18969,16 @@ window.onmouseup = e => {
         if(stateChanged || dragState.thumbDetached) suppressNodeClickUntil = Date.now() + 180;
         clearDropHighlight();
         loopInsertPreview = null;
+        const versionedPositionCommit = dragState;
         dragState = null;
-        scheduleSave();
+        // The narrow service mutation applies only to a standalone empty Smart
+        // Image. Any grouping, connecting, copy, media, or multi-node drag
+        // retains the page-owned compatibility save path.
+        if(versionedPositionCommit) {
+            void commitVersionedSmartPosition(versionedPositionCommit).then(handled => {
+                if(!handled) scheduleSave();
+            });
+        } else scheduleSave();
         scheduleConnectionLayerRefresh();
     }
 };
@@ -18806,9 +18990,15 @@ shell.addEventListener('wheel', e => {
     const sy = e.clientY - rect.top;
     // Trackpads can emit a single wheel event with a very large delta. Clamp
     // one event while retaining the pointer-anchored zoom calculation.
+    const sharedNextScale = smartUnifiedRuntimeEnabled
+        ? window.WorkbenchCanvasRuntime?.viewportScaleForWheel?.(viewport, e.deltaY, {
+            strategy:'exponential', deltaLimit:CANVAS_WHEEL_DELTA_LIMIT, sensitivity:.001,
+            minScale:CANVAS_SCALE_MIN, maxScale:CANVAS_SCALE_MAX,
+        })
+        : null;
     const delta = Math.max(-CANVAS_WHEEL_DELTA_LIMIT, Math.min(CANVAS_WHEEL_DELTA_LIMIT, Number(e.deltaY) || 0));
     const factor = Math.exp(-delta * 0.001);
-    const nextScale = safeScale(viewport.scale * factor);
+    const nextScale = sharedNextScale || safeScale(viewport.scale * factor);
     if(Math.abs(nextScale - viewport.scale) < 0.00001) return;
     if(!applySmartRuntimeViewport({
         type:window.WorkbenchCanvasRuntime?.COMMANDS.VIEWPORT_ZOOM_AT,

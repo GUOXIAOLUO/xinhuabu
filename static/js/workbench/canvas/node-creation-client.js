@@ -21,9 +21,74 @@
         }
     }
 
+    function applyCreationResult(result, options) {
+        const settings = options && typeof options === 'object' ? options : {};
+        if (!Array.isArray(settings.nodes)) throw new TypeError('creation result requires a mutable nodes array');
+        if (typeof settings.projectNode !== 'function') throw new TypeError('creation result requires a projectNode callback');
+        const source = result && result.node;
+        if (!source || !String(source.id || '')) throw new TypeError('creation result requires a created node id');
+        const node = settings.projectNode(source);
+        if (!node || String(node.id || '') !== String(source.id)) throw new TypeError('projectNode must preserve the created node id');
+        settings.nodes.push(node);
+        if (Array.isArray(settings.undoStack) && Object.prototype.hasOwnProperty.call(settings, 'undoSnapshot')) {
+            settings.undoStack.push(settings.undoSnapshot);
+            const limit = Number(settings.undoLimit);
+            if (Number.isInteger(limit) && limit > 0 && settings.undoStack.length > limit) settings.undoStack.shift();
+        }
+        const revision = Number(result && result.canvas_revision);
+        if (settings.canvas && Number.isFinite(revision) && revision > 0) settings.canvas.updated_at = revision;
+        if (typeof settings.onRevision === 'function' && Number.isFinite(revision) && revision > 0) settings.onRevision(revision);
+        if (typeof settings.onSelected === 'function') settings.onSelected(node);
+        return node;
+    }
+
+    function applyGraphCreationResult(result, options) {
+        const settings = options && typeof options === 'object' ? options : {};
+        if (!Array.isArray(settings.nodes)) throw new TypeError('graph creation result requires a mutable nodes array');
+        if (!Array.isArray(settings.connections)) throw new TypeError('graph creation result requires a mutable connections array');
+        if (typeof settings.projectNode !== 'function') throw new TypeError('graph creation result requires a projectNode callback');
+        if (typeof settings.projectEdge !== 'function') throw new TypeError('graph creation result requires a projectEdge callback');
+        const source = result && result.node;
+        const edgeSource = result && result.edge;
+        if (!source || !String(source.id || '')) throw new TypeError('graph creation result requires a created node id');
+        if (!edgeSource || !String(edgeSource.id || '')) throw new TypeError('graph creation result requires a created edge id');
+        const node = settings.projectNode(source);
+        if (!node || String(node.id || '') !== String(source.id)) throw new TypeError('projectNode must preserve the created node id');
+        const edge = settings.projectEdge(edgeSource, node);
+        if (!edge || !String(edge.id || '') || !String(edge.from || '') || !String(edge.to || '')) {
+            throw new TypeError('projectEdge must return an id, from and to');
+        }
+        const target = String(edge.to) === String(node.id)
+            ? node
+            : settings.nodes.find(item => String(item && item.id || '') === String(edge.to));
+        if (!target) throw new Error('The existing connection target is unavailable.');
+        if (settings.syncTargetInput) {
+            target.inputNodeIds = Array.from(new Set([...(target.inputNodeIds || []), edge.from]));
+        }
+        settings.nodes.push(node);
+        settings.connections.push(edge);
+        if (Array.isArray(settings.undoStack) && Object.prototype.hasOwnProperty.call(settings, 'undoSnapshot')) {
+            settings.undoStack.push(settings.undoSnapshot);
+            const limit = Number(settings.undoLimit);
+            if (Number.isInteger(limit) && limit > 0 && settings.undoStack.length > limit) settings.undoStack.shift();
+        }
+        const revision = Number(result && result.canvas_revision);
+        if (settings.canvas && Number.isFinite(revision) && revision > 0) settings.canvas.updated_at = revision;
+        if (typeof settings.onRevision === 'function' && Number.isFinite(revision) && revision > 0) settings.onRevision(revision);
+        if (typeof settings.onSelected === 'function') settings.onSelected(node);
+        if (typeof settings.onAfterCommit === 'function') settings.onAfterCommit(node, edge);
+        return node;
+    }
+
     global.WorkbenchNodeClient = Object.freeze({
         isLoopback: () => ['127.0.0.1', '::1', 'localhost'].includes(window.location.hostname),
-        isEnabled: () => new URLSearchParams(window.location.search).get('versioned_nodes') === '1',
+        // R4 normal creation uses the canonical NodeCreationService on local
+        // product routes. `versioned_nodes=0` is the bounded U7 rollback for
+        // the retained adapter constructors; it is intentionally opt-out,
+        // rather than an experimental opt-in.
+        isEnabled: () => new URLSearchParams(window.location.search).get('versioned_nodes') !== '0',
+        applyCreationResult,
+        applyGraphCreationResult,
         create: (canvasId, command, actorId) => request(`/api/v1/canvases/${encodeURIComponent(canvasId)}/nodes`, 'POST', command, actorId),
         update: (canvasId, nodeId, command, actorId) => request(`/api/v1/canvases/${encodeURIComponent(canvasId)}/nodes/${encodeURIComponent(nodeId)}`, 'PUT', command, actorId),
         remove: (canvasId, nodeId, command, actorId) => request(`/api/v1/canvases/${encodeURIComponent(canvasId)}/nodes/${encodeURIComponent(nodeId)}`, 'DELETE', command, actorId),

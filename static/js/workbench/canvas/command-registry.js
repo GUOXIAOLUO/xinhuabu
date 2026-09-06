@@ -7,8 +7,8 @@
 
     const compatibilityCreateEntries = [
         ['canvas.create.image', 'image', ['classic', 'smart'], 10, ['classic', 'smart'], ['smart']],
-        ['canvas.create.prompt', 'prompt', ['classic', 'smart'], 20, ['classic', 'smart'], ['smart']],
-        ['canvas.create.loop', 'loop', ['classic', 'smart'], 30, ['classic', 'smart'], ['smart']],
+        ['canvas.create.prompt', 'prompt', ['classic', 'smart'], 20, ['classic', 'smart'], ['classic', 'smart']],
+        ['canvas.create.loop', 'loop', ['classic', 'smart'], 30, ['classic', 'smart'], ['classic', 'smart']],
         ['canvas.create.group', 'group', ['classic', 'smart'], 40, ['classic', 'smart'], ['classic', 'smart']],
         ['canvas.create.minimax', 'minimax', ['classic', 'smart'], 50, ['smart'], ['smart']],
         ['canvas.create.llm', 'llm', ['classic'], 60, [], []],
