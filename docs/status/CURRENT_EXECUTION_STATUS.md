@@ -155,6 +155,20 @@ fallback chain (Classic's `Date.now()` sites and Smart's `Date.now()`/`0` split)
 and Classic's dual revision mirror is kept coherent by the shared owner instead
 of per-site discipline. Sandbox tests pin the adoption chain and per-adapter call
 counts; the full regression passes at 284 tests.
+
+R4 save-coordinator unit 2 (2026-09-06): one shared save scheduler
+(`WorkbenchCanvasSaveScheduler`) now owns debounce, in-flight coalescing, retry
+marking, cancel, and in-flight observers for both adapters. Classic's
+`savingCanvasNow`/`saveCanvasAgain`/`saveTimer` and Smart's
+`canvasSyncInFlight`/`saveTimer` are removed; adapters keep payload projection,
+conflict policy, dirty flag, and DOM/status effects. Classic runs coalesced with
+its exact prior 409-retry semantics; Smart runs `allowOverlap: true`, preserving
+its characterized concurrent-save behavior with a marginally wider in-flight
+window (flush entry instead of post-preparation). A characterized side fix:
+Classic's remote-apply deferral read a stale `saveTimer` handle, causing an
+endless 1-second remote reload loop after any local save; the scheduler's real
+pending state replaces it. Sandbox behavioral tests plus source-contract
+assertions pass; the full regression passes at 285 tests.
 Editable-target detection for keyboard/drag guards now shares its base DOM
 semantics; Smart supplies its retained prompt-control selector while Classic keeps
 its existing narrower selector behavior.

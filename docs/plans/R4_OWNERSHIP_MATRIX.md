@@ -294,6 +294,23 @@ the single owner), plus Smart's 4 position and 4 delete sites with their preserv
 (`Date.now()` for position, `0` for delete). A sandbox test pins the adoption chain and source assertions
 pin the exact call counts; JS syntax and the full regression (284 tests) pass. Read-only mutation-path
 browser evidence is deferred to unit (2), which touches the save scheduling those paths exercise.
+
+Migration unit (2) complete (2026-09-06): `WorkbenchCanvasSaveScheduler`
+(`canvas-save-scheduler.js`, loaded by both editor pages before each adapter) now owns debounce,
+in-flight coalescing, retry marking, cancel, and the in-flight observers. Classic's
+`savingCanvasNow`/`saveCanvasAgain`/`saveTimer` and Smart's `canvasSyncInFlight`/`saveTimer` are removed;
+adapters keep only payload projection, conflict policy (Classic replace/defer, Smart merge-and-resave),
+dirty flag, and DOM/status effects, and commit through `schedule`/`flush`/`cancel`/`markAgain`. Classic
+runs with coalescing (`allowOverlap` off, exact prior semantics including the 409 retry-with-dirty path
+via `onRetry`); Smart runs with `allowOverlap: true`, preserving its characterized concurrent-save
+behavior while its merge guards now read the shared in-flight state (whose window is marginally wider:
+it starts at flush entry rather than after payload preparation). Characterized side fix: Classic's
+`applyRemoteCanvasData` deferral condition read a stale `saveTimer` handle (never cleared after a
+debounced fire except by a WS update message), so after any local save the poll-driven remote application
+deferred forever in a 1-second reload loop; the scheduler's real `hasScheduled()` replaces it. Sandbox
+tests cover debounce, coalesced retry (with `onRetry`), overlap mode, cancel, and the observers; source
+assertions pin script order and the removal of all legacy state variables. Full regression: PASS (285
+tests). Remaining in this seam: unit (3) shared 409 detection, unit (4) shared remote-apply scheduling.
 ```
 
 ## Browser — new Canvas
