@@ -1473,7 +1473,10 @@ function startSmartNodeResize(nodeId, pointer){
     const node = nodes.find(item => item.id === nodeId);
     if(!node) return;
     const rect = nodeRect(node);
-    resizeState = {id:node.id, startX:pointer.clientX, startY:pointer.clientY, startW:rect.width, startH:rect.height};
+    const resizeSession = smartUnifiedRuntimeEnabled
+        ? window.WorkbenchCanvasRuntime?.createNodeResizeSession?.({start:{x:pointer.clientX, y:pointer.clientY}, scale:viewport.scale, startWidth:rect.width, startHeight:rect.height})
+        : null;
+    resizeState = {id:node.id, startX:pointer.clientX, startY:pointer.clientY, startW:rect.width, startH:rect.height, resizeSession};
     if(isSmartGroupNode(node)){
         resizeState.startZoom = smartGroupZoom(node);
         const gx0 = Number(node.x) || 0, gy0 = Number(node.y) || 0;
@@ -18571,15 +18574,18 @@ window.onmousemove = e => {
     if(resizeState){
         const node = nodes.find(n => n.id === resizeState.id);
         if(!node) return;
-        const dx = (e.clientX - resizeState.startX) / viewport.scale;
-        const dy = (e.clientY - resizeState.startY) / viewport.scale;
+        const resize = resizeState.resizeSession?.move({x:e.clientX, y:e.clientY}, {scale:viewport.scale});
+        const dx = resize ? resize.dx : (e.clientX - resizeState.startX) / viewport.scale;
+        const dy = resize ? resize.dy : (e.clientY - resizeState.startY) / viewport.scale;
+        const proposedW = resize ? resize.width : resizeState.startW + dx;
+        const proposedH = resize ? resize.height : resizeState.startH + dy;
         const minW = node.type === 'smart-prompt' ? 260 : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : 48;
         const minH = node.type === 'smart-prompt' ? 170 : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
         if(node.type === 'smart-group' && smartGroupImageRefs(node).some(ref => ref.item?.url)){
             // 图片分组：和普通节点一样直接改 w/h，缩略图网格按新尺寸实时重排。不要走下面的“成员缩放”那套，
             // 否则拖动过程里会按成员包围盒/缩放比例收缩，松手才回到拖动宽度（用户反馈的“变宽时先缩小”）。
-            node.w = Math.max(minW, Math.round(resizeState.startW + dx));
-            node.h = Math.max(minH, Math.round(resizeState.startH + dy));
+            node.w = Math.max(minW, Math.round(proposedW));
+            node.h = Math.max(minH, Math.round(proposedH));
             if(smartGroupCompactMembers(node).length) arrangeSmartGroupMembers(node, {skipUndo:true, syncDom:true});
             updateNodeElementDuringResize(node);
             return;
@@ -18589,7 +18595,7 @@ window.onmousemove = e => {
             // 起点的快照整体缩放+重排，然后把分组框自动收紧到成员的包围盒——盒子始终贴合内容，右侧不会留空白。
             const startZoom = resizeState.startZoom || 1;
             // 目标框宽 = 手柄拖出的框宽；缩放映射以“贴合内容的框宽”为基准，保证两个阶段都线性跟随手柄、衔接连续。
-            const targetW = resizeState.startW + dx;
+            const targetW = proposedW;
             const fitBase = resizeState.contentFitW || resizeState.startW || 1;
             const desiredZoom = startZoom * (targetW / fitBase);
             // 成员缩放上限 SMART_GROUP_MAX_MEMBER_ZOOM（默认 1=原始尺寸）：到上限就不再放大成员，改为让分组框继续扩大。
@@ -18620,8 +18626,8 @@ window.onmousemove = e => {
             });
             if(capped || !hasMember){
                 // 成员已到上限（或空分组）：分组框随手柄继续扩大，成员不再放大。
-                node.w = Math.max(minW, Math.round(resizeState.startW + dx));
-                node.h = Math.max(minH, Math.round(resizeState.startH + dy));
+                node.w = Math.max(minW, Math.round(proposedW));
+                node.h = Math.max(minH, Math.round(proposedH));
             } else {
                 // 未到上限：分组框收紧到成员包围盒，贴合内容无空白。
                 node.w = Math.max(minW, Math.round(maxRight - gx + SMART_GROUP_PAD));
@@ -18631,8 +18637,8 @@ window.onmousemove = e => {
             updateNodeElementDuringResize(node);
             return;
         }
-        node.w = Math.max(minW, Math.round(resizeState.startW + dx));
-        node.h = Math.max(minH, Math.round(resizeState.startH + dy));
+        node.w = Math.max(minW, Math.round(proposedW));
+        node.h = Math.max(minH, Math.round(proposedH));
         node.scale = 1;
         updateNodeElementDuringResize(node);
         return;

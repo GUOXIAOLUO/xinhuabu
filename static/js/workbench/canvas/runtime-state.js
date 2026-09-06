@@ -119,6 +119,28 @@
         });
     }
 
+    function createNodeResizeSession(options) {
+        const settings = options && typeof options === 'object' ? options : {};
+        const start = normalizePoint(settings.start);
+        const defaultScale = finite(settings.scale, 1) || 1;
+        const startWidth = finite(settings.startWidth, 0);
+        const startHeight = finite(settings.startHeight, 0);
+        return Object.freeze({
+            move(point, moveOptions) {
+                const current = normalizePoint(point);
+                const scale = finite(moveOptions && moveOptions.scale, defaultScale) || 1;
+                const dx = (current.x - start.x) / scale;
+                const dy = (current.y - start.y) / scale;
+                return Object.freeze({
+                    dx,
+                    dy,
+                    width: startWidth + dx,
+                    height: startHeight + dy,
+                });
+            },
+        });
+    }
+
     function viewportScaleForWheel(viewport, deltaY, options) {
         const settings = options && typeof options === 'object' ? options : {};
         const current = normalizeViewport(viewport).scale;
@@ -317,6 +339,7 @@
         normalizeViewport,
         createViewportPanSession,
         createNodeDragSession,
+        createNodeResizeSession,
         viewportScaleForWheel,
         viewportCenteredOnWorldPoint,
         worldPointFromMinimapPointer,

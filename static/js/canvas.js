@@ -15739,22 +15739,22 @@ function startNodeResize(e, node){
     e.stopPropagation();
     const el = nodesEl.querySelector(`.node[data-id="${node.id}"]`);
     const rect = el?.getBoundingClientRect();
-    resizeNode = {
-        node,
-        sx:e.clientX,
-        sy:e.clientY,
-        sw:(rect?.width ? rect.width / viewport.scale : node.w || defaultNodeSize(node.type).w),
-        sh:(rect?.height ? rect.height / viewport.scale : node.h || defaultNodeSize(node.type).h || 160)
-    };
+    const sw = (rect?.width ? rect.width / viewport.scale : node.w || defaultNodeSize(node.type).w);
+    const sh = (rect?.height ? rect.height / viewport.scale : node.h || defaultNodeSize(node.type).h || 160);
+    const resizeSession = canvasUnifiedRuntimeEnabled
+        ? window.WorkbenchCanvasRuntime?.createNodeResizeSession?.({start:{x:e.clientX, y:e.clientY}, scale:viewport.scale, startWidth:sw, startHeight:sh})
+        : null;
+    resizeNode = {node, sx:e.clientX, sy:e.clientY, sw, sh, resizeSession};
     document.body.classList.add('canvas-node-resize');
     window.onmousemove = onNodeResize;
     window.onmouseup = endDrag;
 }
 function onNodeResize(e){
     if(!resizeNode) return;
+    const resize = resizeNode.resizeSession?.move({x:e.clientX, y:e.clientY}, {scale:viewport.scale});
     const min = defaultNodeSize(resizeNode.node.type);
-    const nextW = Math.max(Math.min(min.w, 220), resizeNode.sw + (e.clientX - resizeNode.sx) / viewport.scale);
-    const nextH = Math.max(96, resizeNode.sh + (e.clientY - resizeNode.sy) / viewport.scale);
+    const nextW = Math.max(Math.min(min.w, 220), resize ? resize.width : resizeNode.sw + (e.clientX - resizeNode.sx) / viewport.scale);
+    const nextH = Math.max(96, resize ? resize.height : resizeNode.sh + (e.clientY - resizeNode.sy) / viewport.scale);
     resizeNode.node.w = Math.round(nextW);
     resizeNode.node.h = Math.round(nextH);
     applyCanvasRuntimeNodeResize(resizeNode.node);

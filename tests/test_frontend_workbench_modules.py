@@ -1197,6 +1197,41 @@ console.log(JSON.stringify({{
         self.assertIn("const pos = sharedPositions?.get(item.id) || {x:item.ox + moveDx, y:item.oy + moveDy};", smart)
         self.assertIn("(e.clientX - dragState.startX) / viewport.scale", smart)
 
+    def test_shared_node_resize_session_projects_proposed_sizes(self):
+        runtime = ROOT / "static" / "js" / "workbench" / "canvas" / "runtime-state.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(runtime))}, 'utf8'), sandbox);
+const shared = sandbox.window.WorkbenchCanvasRuntime;
+const session = shared.createNodeResizeSession({{start:{{x:10, y:20}}, scale:2, startWidth:260, startHeight:160}});
+const moved = session.move({{x:40, y:50}});
+const rescaled = session.move({{x:40, y:50}}, {{scale:4}});
+const fallbackSession = shared.createNodeResizeSession({{start:{{x:0, y:0}}, startWidth:100}});
+const fallbackMoved = fallbackSession.move({{x:-6, y:3}});
+console.log(JSON.stringify({{
+  moved, rescaled, fallbackMoved,
+  frozen: Object.isFrozen(session) && Object.isFrozen(moved) && Object.isFrozen(rescaled),
+}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "moved": {"dx": 15, "dy": 15, "width": 275, "height": 175},
+            "rescaled": {"dx": 7.5, "dy": 7.5, "width": 267.5, "height": 167.5},
+            "fallbackMoved": {"dx": -6, "dy": 3, "width": 94, "height": 3},
+            "frozen": True,
+        })
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        self.assertIn("window.WorkbenchCanvasRuntime?.createNodeResizeSession?.({start:{x:e.clientX, y:e.clientY}, scale:viewport.scale, startWidth:sw, startHeight:sh})", classic)
+        self.assertIn("const nextW = Math.max(Math.min(min.w, 220), resize ? resize.width : resizeNode.sw + (e.clientX - resizeNode.sx) / viewport.scale);", classic)
+        self.assertIn("(e.clientY - resizeNode.sy) / viewport.scale", classic)
+        self.assertIn("window.WorkbenchCanvasRuntime?.createNodeResizeSession?.({start:{x:pointer.clientX, y:pointer.clientY}, scale:viewport.scale, startWidth:rect.width, startHeight:rect.height})", smart)
+        self.assertIn("const proposedW = resize ? resize.width : resizeState.startW + dx;", smart)
+        self.assertIn("const proposedH = resize ? resize.height : resizeState.startH + dy;", smart)
+        self.assertIn("(e.clientY - resizeState.startY) / viewport.scale", smart)
+        self.assertNotIn("Math.round(resizeState.startW + dx)", smart)
+
     def test_node_creation_client_projects_service_results_without_page_specific_shapes(self):
         client = ROOT / "static" / "js" / "workbench" / "canvas" / "node-creation-client.js"
         script = f"""
@@ -1672,7 +1707,7 @@ console.log(JSON.stringify({{
         self.assertIn("command-registry.js?v=2026.09.06.6", page)
         self.assertIn("creation-catalog.js?v=2026.09.04.1", page)
         self.assertIn("generation-intent.js?v=2026.09.04.1", page)
-        self.assertIn("smart-canvas.js?v=2026.09.06.11", page)
+        self.assertIn("smart-canvas.js?v=2026.09.06.12", page)
 
     def test_smart_node_inspector_sections_are_ephemeral_and_collapsible(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
@@ -2368,7 +2403,7 @@ console.log(JSON.stringify({{shellApplied, fullVisible, statusHiddenInFull, cont
         self.assertIn("function admits(policy, node)", admission)
         self.assertIn("renderer-admission.js?v=2026.09.06.1", page)
         self.assertIn(".image-node.legacy-renderer-mounted > .floating-node-actions", styles)
-        self.assertIn("smart-canvas.js?v=2026.09.06.11", page)
+        self.assertIn("smart-canvas.js?v=2026.09.06.12", page)
 
     def test_classic_output_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
@@ -2667,7 +2702,7 @@ console.log(JSON.stringify({{shellApplied, fullVisible, statusHiddenInFull, cont
         self.assertIn("command-registry.js?v=2026.09.06.6", page)
         self.assertIn("creation-catalog.js?v=2026.09.04.1", page)
         self.assertIn("generation-intent.js?v=2026.09.04.1", page)
-        self.assertIn("canvas.js?v=2026.09.06.13", page)
+        self.assertIn("canvas.js?v=2026.09.06.14", page)
         self.assertIn("WorkbenchUnifiedRenderHost.cardShellView({selected:selected.has(node.id), onIntent:handleCanvasNodeShellIntent})", classic)
         self.assertIn("const canvasNodeShellIntentAdapter = window.WorkbenchUnifiedRenderHost.createIntentAdapter({", classic)
         self.assertIn("delete:intent => deleteNodeFromButton(intent.nodeId)", classic)
