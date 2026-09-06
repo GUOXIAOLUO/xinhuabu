@@ -32,7 +32,7 @@ REMOVE       = 可删除/待删除
 | selection | page state machine, except NodeShell and box-selection completion | page state machine, except NodeShell/box completion, media-thumbnail, upload-target and group-menu selection | runtime command primitive plus migrated completion transitions | PARTIAL | Unified | Migrate remaining selection lifecycle. | `runtime-state.js`; NodeShell/box/media-thumbnail/upload-target/group-menu contracts |
 | multi-selection | page state machine | page state machine | runtime command primitive | PARTIAL | Unified | Migrate selection lifecycle. | same |
 | drag | adapter collection/product semantics; shared drag session on default path | adapter collection/product semantics; shared drag session on default path | NodeShell intent plus `createNodeDragSession` position projection | PARTIAL | Unified | Migrate remaining drag commit/DOM lifecycle and group move. | `runtime-state.js`; NodeShell intent adapters; drag-session contract |
-| resize | page state machine | page state machine | NodeShell intent only | PARTIAL | Unified | Migrate resize lifecycle. | NodeShell intent adapters |
+| resize | adapter clamps/product branches; shared resize proposal on default path | adapter clamps/product branches; shared resize proposal on default path | NodeShell intent plus `createNodeResizeSession` size proposal | PARTIAL | Unified | Migrate remaining resize commit/size-mutation lifecycle. | `runtime-state.js`; NodeShell intent adapters; resize-session contract |
 | keyboard handling | page handlers | page handlers | editable-target helper | PARTIAL | Unified | Migrate key command lifecycle. | `interaction-targets.js` |
 | connection start | page port drag | page port drag | shared command/geometry | PARTIAL | Unified | Migrate port-drag lifecycle. | `graph-interaction.js` |
 | connection hover | page hover logic | page hover logic | compatibility helper | PARTIAL | Unified | Migrate hover lifecycle. | status U2 |
@@ -366,6 +366,16 @@ commit policies; `unified_canvas=0` retains the page-local calculation. Sandbox 
 projection, per-move scale override, invalid-member filtering and frozen results; source assertions pin
 the three delegation sites and rollback retention. Focused regression: PASS (102 tests); full
 regression: PASS (288 tests).
+2026-09-06 shared node-resize size proposal: Classic's node resize and Smart's node resize now delegate
+pointer-delta-to-world-delta conversion and the raw start-size proposal to
+`WorkbenchCanvasRuntime.createNodeResizeSession` on the default path. Smart's three resize branches
+(direct, image-group, smart-group member zoom) consume one unified `proposedW/proposedH` pair; Classic
+keeps its `min(min.w, 220)`/96 clamp policy and Smart keeps its per-type clamps, group member-zoom
+algorithm, LLM-instruction height resize, DOM application and commit lifecycle; `unified_canvas=0`
+retains the page-local calculation. Sandbox tests pin delta/proposal projection, per-move scale
+override, default-scale fallback and frozen results; source assertions pin both delegation sites, the
+proposed-size consumption, and the removal of the duplicated `Math.round(startW + dx)` expressions.
+Focused regression: PASS (103 tests); full regression: PASS (289 tests).
 ```
 
 ## Browser — new Canvas
