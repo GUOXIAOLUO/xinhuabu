@@ -31,7 +31,7 @@ REMOVE       = 可删除/待删除
 | semantic zoom | adapter enablement/iteration; shared DOM application on default path | adapter enablement/iteration; shared DOM application on default path | shared policy plus `WorkbenchSemanticZoomApply` indicator/presentation apply+reset owner | PARTIAL | Unified | Move remaining enablement/call timing with renderer ownership. | `semantic-zoom.js`; `semantic-zoom-apply.js` |
 | selection | page state machine, except NodeShell and box-selection completion | page state machine, except NodeShell/box completion, media-thumbnail, upload-target and group-menu selection | runtime command primitive plus migrated completion transitions | PARTIAL | Unified | Migrate remaining selection lifecycle. | `runtime-state.js`; NodeShell/box/media-thumbnail/upload-target/group-menu contracts |
 | multi-selection | page state machine | page state machine | runtime command primitive | PARTIAL | Unified | Migrate selection lifecycle. | same |
-| drag | page state machine | page state machine | NodeShell intent only | PARTIAL | Unified | Migrate drag lifecycle. | NodeShell intent adapters |
+| drag | adapter collection/product semantics; shared drag session on default path | adapter collection/product semantics; shared drag session on default path | NodeShell intent plus `createNodeDragSession` position projection | PARTIAL | Unified | Migrate remaining drag commit/DOM lifecycle and group move. | `runtime-state.js`; NodeShell intent adapters; drag-session contract |
 | resize | page state machine | page state machine | NodeShell intent only | PARTIAL | Unified | Migrate resize lifecycle. | NodeShell intent adapters |
 | keyboard handling | page handlers | page handlers | editable-target helper | PARTIAL | Unified | Migrate key command lifecycle. | `interaction-targets.js` |
 | connection start | page port drag | page port drag | shared command/geometry | PARTIAL | Unified | Migrate port-drag lifecycle. | `graph-interaction.js` |
@@ -40,7 +40,7 @@ REMOVE       = 可删除/待删除
 | connection mutation | GraphMutationService/API for supported connected Group/Image/Prompt/default Loop creation; page mutation otherwise | GraphMutationService/API for supported connected creation; page mutation otherwise | GraphMutationService/API available | PARTIAL | Unified | Migrate normal connect to service. | graph API tests; save/merge characterization below records the side-effect blocker |
 | graph geometry | adapter invocation | adapter invocation | shared geometry algorithms | PARTIAL | Unified | Move graph lifecycle owner. | `graph-geometry.js` |
 | group membership | adapter mutation | adapter mutation | shared membership algorithms | PARTIAL | Unified | Migrate group interaction owner. | `group-membership.js` |
-| group move | page behavior | page behavior | none | CLASSIC/SMART | Unified | Migrate after shared drag owner exists. | adapter drag code |
+| group move | page behavior | page behavior | shared `createNodeDragSession` position projection available | CLASSIC/SMART | Unified | Migrate onto the shared drag session. | `runtime-state.js`; adapter drag code |
 | group render | Classic DOM | Smart DOM | partial NodeShell adapter | PARTIAL | Unified | Finish shared renderer before page deletion. | NodeShell mounts |
 | node shell | adapter supplies records/intent | adapter supplies records/intent | NodeShell/host | PARTIAL | Unified | Make Unified renderer select and mount all normal cards. | `unified-render-host.js` |
 | renderer resolution | Classic policy projection | Smart policy projection | RendererRegistry/host plus RendererAdmission | PARTIAL | Unified | Unified evaluates declared admission; retain page product policy until card parity is explicit. | `renderer-admission.js`; frontend renderer-admission contract |
@@ -248,8 +248,14 @@ execution config and `inputNodeIds`; Classic adds group membership and generator
 service split today would force double writes or a premature rich-mutation API. Keyboard command
 lifecycle migration is likewise deferred: the two adapters own genuinely different command maps and
 selection models, so unification requires the command-registry step, not a bounded move. Polling
-interval/eligibility ownership is blocked on the save/merge machinery unification. No ownership was
-reduced by these assessments; they are recorded to prevent re-deriving the same blockers.
+ownership assessment (2026-09-06, after save-coordinator units 1–4): `WorkbenchCanvasRemoteSync` already
+owns the interval timer, in-flight checking guard, version comparison and metadata fetch for both
+adapters; the remaining divergence is policy-only — Classic/Smart keep their characterized intervalMs
+(2500/8000), eligibility predicates (apply-in-progress/hidden vs in-flight/drag/selection) and `onNewer`
+apply actions (replace vs merge), which are the same adapter-owned conflict/apply policies recorded for
+unit (4) and depend on the viewport/selection state rows. No bounded migration remains in the polling
+row until those state rows move; no ownership was reduced by these assessments; they are recorded to
+prevent re-deriving the same blockers.
 ```
 
 # Save/merge machinery characterization (U7 blocker analysis, 2026-09-06)
@@ -351,6 +357,15 @@ the shared owner applies one computed `WorkbenchSemanticZoom.viewModel` model so
 behavior tests pin shell/legacy apply+reset, indicator build/update, and page script order; source
 assertions pin the delegation sites and the removal of the duplicated per-page apply code. Focused
 regression: PASS (101 tests); full regression: PASS (287 tests).
+2026-09-06 shared node-drag position projection: Classic's main-and-children drag and Smart's group
+drag (including the media-thumbnail detach drag) now delegate pointer-to-world delta, live-scale
+conversion and member-origin position projection to `WorkbenchCanvasRuntime.createNodeDragSession` on
+the default path. Adapters keep member collection (Classic alt-copy/recursive group/multi-select
+collection; Smart group expansion), alt/ctrl product semantics, DOM application, runtime mirrors and
+commit policies; `unified_canvas=0` retains the page-local calculation. Sandbox tests pin multi-member
+projection, per-move scale override, invalid-member filtering and frozen results; source assertions pin
+the three delegation sites and rollback retention. Focused regression: PASS (102 tests); full
+regression: PASS (288 tests).
 ```
 
 ## Browser — new Canvas
