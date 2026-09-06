@@ -1232,6 +1232,21 @@ console.log(JSON.stringify({{
         self.assertIn("(e.clientY - resizeState.startY) / viewport.scale", smart)
         self.assertNotIn("Math.round(resizeState.startW + dx)", smart)
 
+    def test_canvas_state_swaps_reset_the_unified_runtime(self):
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        self.assertIn("function adoptCanvasRuntimeState(nextViewport){", classic)
+        self.assertIn("    canvasUnifiedRuntime = null;", classic)
+        self.assertEqual(classic.count("adoptCanvasRuntimeState(localViewportForCanvas(canvas.id, canvas.viewport || {x:0, y:0, scale:1}));"), 2)
+        self.assertEqual(classic.count("adoptCanvasRuntimeState({x: -1800, y: -1000, scale: 1});"), 2)
+        self.assertIn("connections = canvas.connections || [];\n        adoptCanvasRuntimeState(localViewport);", classic)
+        self.assertEqual(classic.count("viewport = localViewport;"), 1)
+        self.assertIn("function adoptSmartRuntimeState(nextViewport){", smart)
+        self.assertIn("    smartUnifiedRuntime = null;", smart)
+        self.assertIn("adoptSmartRuntimeState(mergedViewport);", smart)
+        self.assertNotIn("viewport = {...viewport, ...(canvas.viewport || {})};", smart)
+        self.assertNotIn("viewport.scale = safeScale(viewport.scale);", smart)
+
     def test_node_creation_client_projects_service_results_without_page_specific_shapes(self):
         client = ROOT / "static" / "js" / "workbench" / "canvas" / "node-creation-client.js"
         script = f"""
@@ -1707,7 +1722,7 @@ console.log(JSON.stringify({{
         self.assertIn("command-registry.js?v=2026.09.06.6", page)
         self.assertIn("creation-catalog.js?v=2026.09.04.1", page)
         self.assertIn("generation-intent.js?v=2026.09.04.1", page)
-        self.assertIn("smart-canvas.js?v=2026.09.06.12", page)
+        self.assertIn("smart-canvas.js?v=2026.09.06.13", page)
 
     def test_smart_node_inspector_sections_are_ephemeral_and_collapsible(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
@@ -2403,7 +2418,7 @@ console.log(JSON.stringify({{shellApplied, fullVisible, statusHiddenInFull, cont
         self.assertIn("function admits(policy, node)", admission)
         self.assertIn("renderer-admission.js?v=2026.09.06.1", page)
         self.assertIn(".image-node.legacy-renderer-mounted > .floating-node-actions", styles)
-        self.assertIn("smart-canvas.js?v=2026.09.06.12", page)
+        self.assertIn("smart-canvas.js?v=2026.09.06.13", page)
 
     def test_classic_output_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
@@ -2702,7 +2717,7 @@ console.log(JSON.stringify({{shellApplied, fullVisible, statusHiddenInFull, cont
         self.assertIn("command-registry.js?v=2026.09.06.6", page)
         self.assertIn("creation-catalog.js?v=2026.09.04.1", page)
         self.assertIn("generation-intent.js?v=2026.09.04.1", page)
-        self.assertIn("canvas.js?v=2026.09.06.14", page)
+        self.assertIn("canvas.js?v=2026.09.06.15", page)
         self.assertIn("WorkbenchUnifiedRenderHost.cardShellView({selected:selected.has(node.id), onIntent:handleCanvasNodeShellIntent})", classic)
         self.assertIn("const canvasNodeShellIntentAdapter = window.WorkbenchUnifiedRenderHost.createIntentAdapter({", classic)
         self.assertIn("delete:intent => deleteNodeFromButton(intent.nodeId)", classic)

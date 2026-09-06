@@ -112,6 +112,13 @@ function applySmartRuntimeViewport(command){
     viewport = {...runtime.snapshot().viewport};
     return true;
 }
+function adoptSmartRuntimeState(nextViewport){
+    if(nextViewport) viewport = nextViewport;
+    // Canvas state swaps must reset the runtime so it reseeds from the new
+    // canvas's viewport, geometry and selection instead of a stale base.
+    smartUnifiedRuntime = null;
+    return viewport;
+}
 function applySmartRuntimeSelection(ids){
     const runtime = syncSmartRuntimeGeometry();
     if(!runtime) return false;
@@ -6648,8 +6655,9 @@ async function loadCanvas(){
         const recoveredLoopOutputs = recoverStuckLoopOutputsFromLogs();
         const hiddenCompletedTimers = hideCompletedRunTimers();
         const cleanedDetachedInputs = cleanupDetachedRunInputRefs();
-        viewport = {...viewport, ...(canvas.viewport || {})};
-        viewport.scale = safeScale(viewport.scale);
+        const mergedViewport = {...viewport, ...(canvas.viewport || {})};
+        mergedViewport.scale = safeScale(mergedViewport.scale);
+        adoptSmartRuntimeState(mergedViewport);
         const recoveredSpatialViewport = recoverSmartViewportIfCorrupt();
         if(canvas.settings) settings = {...settings, ...canvas.settings};
         normalizeSmartVideoModeSettings(settings, true);

@@ -377,6 +377,14 @@ function applyCanvasRuntimeViewport(command){
     viewport = {...runtime.snapshot().viewport};
     return true;
 }
+function adoptCanvasRuntimeState(nextViewport){
+    if(nextViewport) viewport = nextViewport;
+    // Canvas state swaps (open/create/remote-replace/return/delete) must reset the
+    // runtime: a surviving instance would keep the previous canvas's viewport,
+    // geometry and selection and compute zoom-at against a stale base.
+    canvasUnifiedRuntime = null;
+    return viewport;
+}
 function applyCanvasRuntimeSelection(ids, toggleId=''){
     const runtime = syncCanvasRuntimeGeometry();
     if(!runtime) return false;
@@ -1941,7 +1949,7 @@ async function createCanvas(){
         canvas.logs = canvas.logs || [];
         nodes = canvas.nodes || [];
         connections = canvas.connections || [];
-        viewport = localViewportForCanvas(canvas.id, canvas.viewport || {x:0, y:0, scale:1});
+        adoptCanvasRuntimeState(localViewportForCanvas(canvas.id, canvas.viewport || {x:0, y:0, scale:1}));
         canvas.viewport = {...viewport};
         resetTransientRunState(nodes);
         sanitizeConnections();
@@ -2092,7 +2100,7 @@ async function openCanvas(id){
         canvas.logs = canvas.logs || [];
         nodes = canvas.nodes || [];
         connections = canvas.connections || [];
-        viewport = localViewportForCanvas(canvas.id, canvas.viewport || {x:0, y:0, scale:1});
+        adoptCanvasRuntimeState(localViewportForCanvas(canvas.id, canvas.viewport || {x:0, y:0, scale:1}));
         canvas.viewport = {...viewport};
         lastCanvasUpdatedAt = Number(canvas.updated_at || 0);
         localCanvasDirty = false;
@@ -2129,7 +2137,7 @@ function applyRemoteCanvasData(remote){
         canvas.logs = canvas.logs || [];
         nodes = canvas.nodes || [];
         connections = canvas.connections || [];
-        viewport = localViewport;
+        adoptCanvasRuntimeState(localViewport);
         canvas.viewport = {...viewport};
         lastCanvasUpdatedAt = Number(canvas.updated_at || Date.now());
         localCanvasDirty = false;
@@ -2251,7 +2259,7 @@ async function returnToCanvasManager(){
     nodes = [];
     connections = [];
     selected.clear();
-    viewport = {x: -1800, y: -1000, scale: 1};
+    adoptCanvasRuntimeState({x: -1800, y: -1000, scale: 1});
     setCanvasMode(false);
     trashMode = false;
     pendingPurgeCanvasId = null;
@@ -2297,7 +2305,7 @@ async function deleteCanvas(id, event){
             nodes = [];
             connections = [];
             selected.clear();
-            viewport = {x: -1800, y: -1000, scale: 1};
+            adoptCanvasRuntimeState({x: -1800, y: -1000, scale: 1});
             setCanvasMode(false);
         }
         renderCanvasList();
