@@ -376,6 +376,18 @@ retains the page-local calculation. Sandbox tests pin delta/proposal projection,
 override, default-scale fallback and frozen results; source assertions pin both delegation sites, the
 proposed-size consumption, and the removal of the duplicated `Math.round(startW + dx)` expressions.
 Focused regression: PASS (103 tests); full regression: PASS (289 tests).
+2026-09-06 clipboard/subgraph parity acceptance and smart-group paste fix (isolated `127.0.0.1:3018`,
+process-local SQLite copy): on the Classic fixture, all six nodes selected through the runtime command,
+page `copySelectedNodes` captured a 6-node/6-connection fragment with an identical type multiset, and
+page `pasteNodes` appended exactly six remapped-id copies with six new connections, preserved relative
+geometry, and auto-selection. On the Smart fixture the same page flow round-tripped a Prompt card with
+a remapped id. The run exposed a real pre-existing gap: Smart's paste remapped `inputNodeIds` and
+`sourceNodeId` but kept a pasted smart-group's `items` pointing at the at-copy-time member ids. Fixed by
+remapping items through the shared materializer id map, keeping refs to pre-existing nodes, and dropping
+dangling ids (the filter must also check the not-yet-pushed copies). Browser-verified three scenarios:
+group+member remap with the pasted group resolving its pasted member, original-ref retention when the
+member was not copied, and dangling-id drop. Focused regression: PASS (104 tests); full regression:
+PASS (294 tests).
 ```
 
 ## Browser — new Canvas
