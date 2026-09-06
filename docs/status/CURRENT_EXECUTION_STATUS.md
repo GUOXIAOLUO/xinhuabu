@@ -122,6 +122,18 @@ nodes, and the repaired Classic record's canonical metadata intact. Running a
 legacy-routed server (`WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED=false`) while
 SQLite authority is active is now a known split-brain hazard and must not be used
 for normal product work.
+
+R4 deferred-migration assessment (2026-09-06): three next-step candidates were
+inspected and deliberately deferred with recorded reasons. Normal-connect
+service migration is blocked because both adapters couple the edge commit with
+page-owned side effects on the same raw save (Smart mutates target execution
+config and `inputNodeIds`; Classic adds group membership and generator/output
+sync); splitting it now would force double writes or a premature rich-mutation
+API. Keyboard command lifecycle unification requires the command-registry step
+because the adapters own genuinely different command maps and selection models.
+Polling interval/eligibility ownership is blocked on the save/merge machinery
+unification. The mutation shape boundary additionally gained SQLite-store test
+coverage (283 tests total).
 Editable-target detection for keyboard/drag guards now shares its base DOM
 semantics; Smart supplies its retained prompt-control selector while Classic keeps
 its existing narrower selector behavior.
@@ -382,9 +394,10 @@ Command:
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -q
 ```
 
-Result: PASS after current R4 work — 280 tests in 2.1 seconds, Python 3.14.7
-(2026-09-06, including the backend blank-shape mutation boundary and route
-rejection contract).
+Result: PASS after current R4 work — 283 tests in 2.2 seconds, Python 3.14.7
+(2026-09-06, including the backend blank-shape mutation boundary, its route
+rejection contract, and equivalent boundary coverage through the SQLite
+compatibility repository).
 
 R4 canonical-routing local acceptance:
 

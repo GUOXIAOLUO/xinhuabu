@@ -235,6 +235,21 @@ recorded in CURRENT_EXECUTION_STATUS.md. An isolated restart read on `127.0.0.1:
 active Canvases with no phantom `baseline` row, read the imported orphan with its two nodes and merged
 board position, and read the repaired Classic record's canonical metadata; the temporary service was
 stopped after the read-only check.
+
+2026-09-06 SQLite-path mutation boundary coverage: the same blank-shape update/delete contracts,
+`unsupported_node_shape` rejection (content-bearing and grouped nodes), and stale-revision rejection now
+have focused tests through the `SqliteCanvasCompatibilityRepository`, pinning that the backend boundary
+holds identically on the canonical store rather than only on the Legacy JSON path. Focused regression:
+PASS (8 tests); full regression: PASS (283 tests).
+
+Assessed and deferred (2026-09-06): normal-connect service migration remains blocked because both
+adapters couple the edge commit with page-owned side effects on the same raw save (Smart mutates target
+execution config and `inputNodeIds`; Classic adds group membership and generator/output sync), so a
+service split today would force double writes or a premature rich-mutation API. Keyboard command
+lifecycle migration is likewise deferred: the two adapters own genuinely different command maps and
+selection models, so unification requires the command-registry step, not a bounded move. Polling
+interval/eligibility ownership is blocked on the save/merge machinery unification. No ownership was
+reduced by these assessments; they are recorded to prevent re-deriving the same blockers.
 ```
 
 ## Browser — new Canvas
