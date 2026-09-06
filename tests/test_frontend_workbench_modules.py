@@ -900,6 +900,68 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
         self.assertIn("WorkbenchCanvasSaveScheduler.create", smart)
         self.assertIn("allowOverlap: true", smart)
 
+    def test_remote_apply_retries_share_one_scheduler_owner(self):
+        scheduler = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-save-scheduler.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const timers = [];
+const sandbox = {{
+  window: {{}},
+  setTimeout: (callback, delay) => {{ timers.push({{callback, delay, cleared: false}}); return timers.length; }},
+  clearTimeout: handle => {{ if (timers[handle - 1]) timers[handle - 1].cleared = true; }},
+}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(scheduler))}, 'utf8'), sandbox);
+const S = sandbox.window.WorkbenchCanvasSaveScheduler;
+const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+(async () => {{
+  const applied = [];
+  const remote = S.createRemoteApply({{apply: () => applied.push(1), defaultDelayMs: 1000}});
+  remote.schedule();
+  const first = timers[timers.length - 1];
+  const defaulted = first.delay === 1000 && !first.cleared && applied.length === 0;
+  remote.schedule(700);
+  const replaced = first.cleared && applied.length === 0;
+  const second = timers[timers.length - 1];
+  second.callback();
+  await tick();
+  const fired = applied.length === 1 && !remote.hasPending();
+
+  remote.schedule(50);
+  remote.cancel();
+  const canceled = !remote.hasPending();
+  await tick();
+
+  const bare = S.createRemoteApply({{apply: () => applied.push(2)}});
+  bare.schedule();
+  const fallbackDefault = timers[timers.length - 1].delay === 200;
+  let rejected = false;
+  try {{ S.createRemoteApply({{ }}); }} catch (e) {{ rejected = true; }}
+  console.log(JSON.stringify({{defaulted, replaced, fired, canceled, applied: applied.length, fallbackDefault, rejected}}));
+}})();
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["defaulted"])
+        self.assertTrue(payload["replaced"])
+        self.assertTrue(payload["fired"])
+        self.assertTrue(payload["canceled"])
+        self.assertEqual(payload["applied"], 1)
+        self.assertTrue(payload["fallbackDefault"])
+        self.assertTrue(payload["rejected"])
+
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        self.assertNotIn("remoteSyncTimer", classic)
+        self.assertIn("WorkbenchCanvasSaveScheduler.createRemoteApply", classic)
+        self.assertIn("defaultDelayMs: 1000", classic)
+        self.assertEqual(classic.count("remoteApplyTimer.schedule("), 2)
+        self.assertNotIn("canvasSyncTimer", smart)
+        self.assertNotIn("scheduleCanvasMergeReload", smart)
+        self.assertIn("WorkbenchCanvasSaveScheduler.createRemoteApply", smart)
+        self.assertIn("defaultDelayMs: 200", smart)
+        self.assertEqual(smart.count("mergeReloadTimer.schedule("), 2)
+
     def test_remote_sync_polls_canvas_metadata_through_adapter_callbacks(self):
         remote_sync = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-remote-sync.js"
         script = f"""

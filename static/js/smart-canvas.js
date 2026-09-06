@@ -5877,7 +5877,10 @@ function handleAssetLibraryUpdatedMessage(data={}){
 // 多人协作同步：一个稳定的客户端 id，既用于 WS 连接，也随 saveCanvas 上报，
 // 服务器广播 canvas_updated 时带回 client_id，自己发的就忽略，避免自我刷新。
 const smartClientId = `canvas_smart_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
-let canvasSyncTimer = null;
+const mergeReloadTimer = window.WorkbenchCanvasSaveScheduler.createRemoteApply({
+    apply: () => { mergeReloadCanvasNow(); },
+    defaultDelayMs: 200,
+});
 let smartRemoteSync = null;
 let connectionLayerRaf = 0;
 function mergeSmartImageLists(localImgs, remoteImgs){
@@ -6114,7 +6117,7 @@ async function mergeReloadCanvasNow(){
     if(!canvasId) return;
     if(dragState || selectionState){
         // 用户正在拖拽/框选，稍后再合并，别打断操作
-        scheduleCanvasMergeReload(600);
+        mergeReloadTimer.schedule(600);
         return;
     }
     try {
@@ -6123,17 +6126,13 @@ async function mergeReloadCanvasNow(){
         if(data && data.canvas) applyMergedServerCanvas(data.canvas);
     } catch(e) {}
 }
-function scheduleCanvasMergeReload(delay=200){
-    clearTimeout(canvasSyncTimer);
-    canvasSyncTimer = setTimeout(() => { mergeReloadCanvasNow(); }, delay);
-}
 function handleCanvasUpdatedMessage(data={}){
     const update = window.WorkbenchCanvasUpdateMessage.newerForCanvas(data, {
         canvasId, clientId:smartClientId, currentUpdatedAt:canvas?.updated_at,
     });
     if(!update) return;
     if(saveScheduler.isInFlight()) return; // 我正在保存，保存完成/409 合并会处理
-    scheduleCanvasMergeReload(200);
+    mergeReloadTimer.schedule(200);
 }
 function startCanvasMetaPoll(){
     // WS / iframe 转发不可靠时的兜底：定期看服务器 updated_at 是否变新，变新就合并拉取

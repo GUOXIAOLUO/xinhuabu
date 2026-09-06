@@ -1,4 +1,5 @@
-/* Shared Canvas save scheduling: debounce, in-flight coalescing, retry marking. */
+/* Shared Canvas save scheduling: debounce, in-flight coalescing, retry marking,
+   plus one deferred remote-apply retry owner per editor. */
 (function exposeCanvasSaveScheduler(global) {
     'use strict';
 
@@ -73,5 +74,35 @@
         });
     }
 
-    global.WorkbenchCanvasSaveScheduler = Object.freeze({create});
+    // One pending remote-apply/reload retry per editor. The adapter supplies the
+    // apply action, its deferral conditions and its policy delays; this owner
+    // keeps the single pending slot and replaces any pending attempt, matching
+    // both adapters' prior clear-then-set timer behavior.
+    function createRemoteApply(options) {
+        const settings = options || {};
+        if (typeof settings.apply !== 'function') throw new TypeError('apply callback is required');
+        const defaultDelayMs = positiveNumber(settings.defaultDelayMs, 200);
+        let timer = null;
+
+        function schedule(delayMs) {
+            clearTimeout(timer);
+            timer = setTimeout(() => {
+                timer = null;
+                settings.apply();
+            }, positiveNumber(delayMs, defaultDelayMs));
+        }
+
+        function cancel() {
+            clearTimeout(timer);
+            timer = null;
+        }
+
+        return Object.freeze({
+            schedule,
+            cancel,
+            hasPending: () => timer !== null,
+        });
+    }
+
+    global.WorkbenchCanvasSaveScheduler = Object.freeze({create, createRemoteApply});
 }(window));

@@ -426,12 +426,15 @@ backToManagerBtn?.addEventListener('click', () => {
 });
 let localCanvasDirty = false;
 let applyingRemoteCanvas = false;
-let remoteSyncTimer = null;
 let canvasRemoteSync = null;
 const saveScheduler = window.WorkbenchCanvasSaveScheduler.create({
     debounceMs: 500,
     run: () => saveCanvasNow(),
     onRetry: () => { localCanvasDirty = true; },
+});
+const remoteApplyTimer = window.WorkbenchCanvasSaveScheduler.createRemoteApply({
+    apply: () => syncRemoteCanvasNow(),
+    defaultDelayMs: 1000,
 });
 let lastCanvasUpdatedAt = 0;
 let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
@@ -2131,8 +2134,7 @@ async function openCanvas(id){
 function applyRemoteCanvasData(remote){
     if(!remote || !canvas || remote.id !== canvas.id) return;
     if(localCanvasDirty || saveScheduler.hasScheduled() || saveScheduler.isInFlight() || saveScheduler.hasPendingAgain()){
-        clearTimeout(remoteSyncTimer);
-        remoteSyncTimer = setTimeout(syncRemoteCanvasNow, 1000);
+        remoteApplyTimer.schedule(1000);
         return;
     }
     applyingRemoteCanvas = true;
@@ -2255,8 +2257,7 @@ function handleCanvasUpdatedMessage(data){
     if(!update) return;
     saveScheduler.cancel();
     localCanvasDirty = false;
-    clearTimeout(remoteSyncTimer);
-    remoteSyncTimer = setTimeout(syncRemoteCanvasNow, saveScheduler.isInFlight() ? 700 : 120);
+    remoteApplyTimer.schedule(saveScheduler.isInFlight() ? 700 : 120);
     setStatus('Syncing...');
 }
 async function returnToCanvasManager(){
