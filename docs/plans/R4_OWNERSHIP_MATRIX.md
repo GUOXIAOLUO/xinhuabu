@@ -547,6 +547,17 @@ baseline comparison; all values are below the provisional 120 ms local alert.
 Prompt nodes — render ready 191 ms, zoom 16.6 ms, pan 37.6 ms, minimap 28.9 ms, 9,445 target DOM
 elements, PASS. No interaction regression from the shared interaction-session changes; the offscreen
 minimap cadence P2 follow-up remains recorded.
+
+2026-09-06 Gate-K duplication and memory inspection on the same worktree (isolated server, disposable
+300-node canonical record): source-level scan found only two recurring `setInterval` sites in the
+adapters, both guarded against re-registration (`outputTimer`, `runTimerInterval`), one shared
+remote-sync poll instance per page, and one shared save scheduler; window-level handlers use assignment
+semantics (`window.onmousemove/onmouseup`, 30+2 sites) so they cannot accumulate, and Smart's
+`bindNodeEvents` binds only elements freshly created by each render pass, so discarded cards release
+their listeners. A browser probe ran ten real zoom+pan interaction cycles on the 300-node record: the
+DOM element count stayed exactly 9,744 in every cycle (no DOM duplication or growth) and
+`usedJSHeapSize` went from 19 MB to 16 MB (no growth; transient garbage collected). See the benchmark
+rerun above for the latency budget.
 ```
 
 ---
