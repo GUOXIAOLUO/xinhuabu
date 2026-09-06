@@ -24,7 +24,7 @@ REMOVE       = 可删除/待删除
 | Canvas entry | compatibility handoff | compatibility page | `canvas.html` | PARTIAL | Unified | Remove retained Smart deep-link handoff after Smart record rendering is native. | `canvas-entry-compatibility.js`; status U6 |
 | Canvas persistence | adapter client | adapter client | SQLite `CanvasRecord` | UNIFIED | Unified | Keep Legacy JSON only as import/rollback. | status R3/R4 acceptance |
 | revision/CAS | none | none | API/application service | UNIFIED | Unified | Maintain conflict coverage. | `tests/test_canvas_nodes_runtime.py` |
-| remote/version polling | interval/merge policy | interval/merge policy | transport-neutral coordinator only | PARTIAL | Unified | Move polling policy/state into the product runtime. | `canvas-remote-sync.js`; status U7 |
+| remote/version polling | interval/merge policy | interval/merge policy | transport-neutral coordinator only | PARTIAL | Unified | Move polling policy/state into the product runtime. | `canvas-remote-sync.js`; save/merge characterization below |
 | viewport state | page state + runtime mirror; default fit/recovery commits use runtime | page state + runtime mirror; default fit/recovery commits use runtime | `CanvasRuntime` policy/mirror | PARTIAL | Unified | Make one runtime state authoritative. | `canvas.js`, `smart-canvas.js`, `runtime-state.js`; fit/recovery contract |
 | pan | page DOM/save shell; shared viewport pan session on default path | page DOM/save shell; shared viewport pan session on default path | CanvasRuntime command plus shared pan session | PARTIAL | Unified | Migrate remaining DOM/persistence lifecycle. | `runtime-state.js`; pan-session contract |
 | zoom | page preview/minimap shell; shared wheel-scale, centering and default preview-exit commits | page preview/minimap shell; shared wheel-scale, centering and default preview-exit commits | CanvasRuntime command plus shared viewport policy | PARTIAL | Unified | Migrate remaining DOM/minimap/persistence lifecycle. | `runtime-state.js`; viewport interaction contracts |
@@ -37,7 +37,7 @@ REMOVE       = 可删除/待删除
 | connection start | page port drag | page port drag | shared command/geometry | PARTIAL | Unified | Migrate port-drag lifecycle. | `graph-interaction.js` |
 | connection hover | page hover logic | page hover logic | compatibility helper | PARTIAL | Unified | Migrate hover lifecycle. | status U2 |
 | port compatibility | adapter invocation | adapter invocation | shared compatibility contract | PARTIAL | Unified | Route one interaction runtime through it. | `port-compatibility.js` |
-| connection mutation | GraphMutationService/API for supported connected Group/Image/Prompt/default Loop creation; page mutation otherwise | GraphMutationService/API for supported connected creation; page mutation otherwise | GraphMutationService/API available | PARTIAL | Unified | Migrate normal connect to service. | graph API tests; Classic/Smart connected-creation contracts |
+| connection mutation | GraphMutationService/API for supported connected Group/Image/Prompt/default Loop creation; page mutation otherwise | GraphMutationService/API for supported connected creation; page mutation otherwise | GraphMutationService/API available | PARTIAL | Unified | Migrate normal connect to service. | graph API tests; save/merge characterization below records the side-effect blocker |
 | graph geometry | adapter invocation | adapter invocation | shared geometry algorithms | PARTIAL | Unified | Move graph lifecycle owner. | `graph-geometry.js` |
 | group membership | adapter mutation | adapter mutation | shared membership algorithms | PARTIAL | Unified | Migrate group interaction owner. | `group-membership.js` |
 | group move | page behavior | page behavior | none | CLASSIC/SMART | Unified | Migrate after shared drag owner exists. | adapter drag code |
@@ -250,6 +250,42 @@ lifecycle migration is likewise deferred: the two adapters own genuinely differe
 selection models, so unification requires the command-registry step, not a bounded move. Polling
 interval/eligibility ownership is blocked on the save/merge machinery unification. No ownership was
 reduced by these assessments; they are recorded to prevent re-deriving the same blockers.
+```
+
+# Save/merge machinery characterization (U7 blocker analysis, 2026-09-06)
+
+This table characterizes the two adapter save state machines that block the polling, normal-connect,
+and viewport ownership rows. It is the prerequisite for one shared save coordinator; it does not itself
+migrate ownership.
+
+| Concern | Classic (`canvas.js`) | Smart (`smart-canvas.js`) |
+|---|---|---|
+| Debounce | `scheduleSave` 500 ms | `scheduleSave` 450 ms |
+| Dirty tracking | `localCanvasDirty` flag gates 409 recovery and remote apply deferral | none; any scheduled save sends the full current payload |
+| In-flight coalescing | `savingCanvasNow` + `saveCanvasAgain` re-run loop | `canvasSyncInFlight` guard only |
+| Payload projection | `serializableCanvasNodes()` | `canvasForStorage()` (media/run-settings stripping, settings projection, prompt-draft flush) |
+| Base revision source | `lastCanvasUpdatedAt` (separate mirror; versioned writes update both it and `canvas.updated_at`) | `canvas.updated_at` directly (single source) |
+| 409 conflict policy | dirty → adopt remote revision and retry; clean → replace-apply remote canvas | merge server canvas (node-list merge, image union, connection merge) then re-save after 300 ms — neither side is dropped |
+| Remote-apply semantics | `applyRemoteCanvasData`: whole-canvas replace preserving local viewport + selection; deferred 1 s while dirty/saving | `applyMergedServerCanvas`: merge into local state, adopt title/revision, re-save if local cleanup recovered state; deferred 600 ms while dragging/selecting |
+| Remote-read sync | `syncRemoteCanvasNow`: replace if remote >= local | `mergeReloadCanvasNow`: merge, with drag/selection deferral |
+| Remote-sync poll eligibility | `!applyingRemoteCanvas && !document.hidden`, 2.5 s | `!canvasSyncInFlight && !dragState && !selectionState`, 8 s |
+| WS update-message path | shared filter → cancel pending save timer, replace-apply | shared filter → skip while in-flight, schedule merge reload |
+
+Design consequence: the two machines share debounce/coalescing/revision-bookkeeping/transport shape but
+disagree on the two hard parts — conflict resolution (replace vs merge-union) and remote application.
+The unified seam must therefore own scheduling, coalescing, dirty lifecycle, one authoritative revision
+mirror, and 409 detection, while delegating conflict resolution and remote application to adapter-supplied
+policies until the node-list merge semantics become a shared characterized module. Unifying Classic's
+dual revision mirror onto the single authoritative revision is part of that seam's first migration unit.
+Classic's replace semantics additionally depend on preserving local viewport and selection, which remain
+page-owned state until the viewport row migrates.
+
+Migration order derived from this table (each unit is independently testable with `unified_canvas=0`
+rollback): (1) one revision-mirror owner; (2) shared schedule/debounce/coalesce/in-flight coordinator
+with adapter payload projection; (3) shared 409 detection with adapter conflict policy; (4) shared
+remote-apply scheduling with adapter apply policy; (5) only then, polling eligibility and normal-connect
+commit can move without double writes.
+
 ```
 
 ## Browser — new Canvas

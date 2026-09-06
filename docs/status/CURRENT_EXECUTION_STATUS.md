@@ -134,6 +134,19 @@ because the adapters own genuinely different command maps and selection models.
 Polling interval/eligibility ownership is blocked on the save/merge machinery
 unification. The mutation shape boundary additionally gained SQLite-store test
 coverage (283 tests total).
+
+R4 save/merge characterization (2026-09-06): both adapter save state machines are
+now characterized side by side in `docs/plans/R4_OWNERSHIP_MATRIX.md` — Classic
+runs replace semantics with a dual revision mirror (`lastCanvasUpdatedAt` plus
+`canvas.updated_at`), dirty-flag-gated 409 recovery, and viewport/selection
+preservation; Smart runs merge-union semantics with a single revision source,
+`canvasSyncInFlight` coalescing, and media/settings payload projection. The
+derived seam is one shared save coordinator owning scheduling, coalescing, dirty
+lifecycle, revision bookkeeping, and 409 detection, with adapter-supplied
+conflict-resolution and remote-apply policies; the documented migration order is
+revision mirror first, then scheduling/coalescing, then conflict detection, then
+remote-apply scheduling. This characterization changes no product behavior and is
+the prerequisite for the polling, normal-connect, and viewport ownership rows.
 Editable-target detection for keyboard/drag guards now shares its base DOM
 semantics; Smart supplies its retained prompt-control selector while Classic keeps
 its existing narrower selector behavior.
