@@ -28,7 +28,7 @@ REMOVE       = 可删除/待删除
 | viewport state | page state + runtime mirror; default fit/recovery commits use runtime | page state + runtime mirror; default fit/recovery commits use runtime | `CanvasRuntime` policy/mirror | PARTIAL | Unified | Make one runtime state authoritative. | `canvas.js`, `smart-canvas.js`, `runtime-state.js`; fit/recovery contract |
 | pan | page DOM/save shell; shared viewport pan session on default path | page DOM/save shell; shared viewport pan session on default path | CanvasRuntime command plus shared pan session | PARTIAL | Unified | Migrate remaining DOM/persistence lifecycle. | `runtime-state.js`; pan-session contract |
 | zoom | page preview/minimap shell; shared wheel-scale, centering and default preview-exit commits | page preview/minimap shell; shared wheel-scale, centering and default preview-exit commits | CanvasRuntime command plus shared viewport policy | PARTIAL | Unified | Migrate remaining DOM/minimap/persistence lifecycle. | `runtime-state.js`; viewport interaction contracts |
-| semantic zoom | adapter application | adapter application | shared policy | PARTIAL | Unified | Move DOM application into Unified renderer. | `semantic-zoom.js` |
+| semantic zoom | adapter enablement/iteration; shared DOM application on default path | adapter enablement/iteration; shared DOM application on default path | shared policy plus `WorkbenchSemanticZoomApply` indicator/presentation apply+reset owner | PARTIAL | Unified | Move remaining enablement/call timing with renderer ownership. | `semantic-zoom.js`; `semantic-zoom-apply.js` |
 | selection | page state machine, except NodeShell and box-selection completion | page state machine, except NodeShell/box completion, media-thumbnail, upload-target and group-menu selection | runtime command primitive plus migrated completion transitions | PARTIAL | Unified | Migrate remaining selection lifecycle. | `runtime-state.js`; NodeShell/box/media-thumbnail/upload-target/group-menu contracts |
 | multi-selection | page state machine | page state machine | runtime command primitive | PARTIAL | Unified | Migrate selection lifecycle. | same |
 | drag | page state machine | page state machine | NodeShell intent only | PARTIAL | Unified | Migrate drag lifecycle. | NodeShell intent adapters |
@@ -342,6 +342,15 @@ characterized seam migration order is complete (revision mirror → schedule/coa
 assessment → remote-apply scheduling), so the polling interval/eligibility ownership row is no longer
 blocked on this seam. Both adapters' apply actions, deferral conditions, and conflict policies remain
 adapter-owned by design.
+2026-09-06 shared semantic-zoom DOM application: Classic and Smart default paths now delegate indicator
+construction and NodeShell/Legacy presentation apply+reset to `WorkbenchSemanticZoomApply`
+(`semantic-zoom-apply.js`). Adapters keep enablement policy, node/selectors iteration and call timing,
+including Smart's floating-menu, hint and smart-actions extras and both adapters' disabled-path resets;
+the shared owner applies one computed `WorkbenchSemanticZoom.viewModel` model so Classic's
+`model.showSummary` and Smart's `presentation === 'summary'` status rule stay equivalent. Sandbox
+behavior tests pin shell/legacy apply+reset, indicator build/update, and page script order; source
+assertions pin the delegation sites and the removal of the duplicated per-page apply code. Focused
+regression: PASS (101 tests); full regression: PASS (287 tests).
 ```
 
 ## Browser — new Canvas
