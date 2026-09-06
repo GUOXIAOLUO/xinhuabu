@@ -488,6 +488,20 @@ semantic indicator. No console errors surfaced; the temporary server and databas
 removed after the check. Smart retains no workflow transfer UI, so parity is a Classic/Unified surface.
 ```
 
+## Architecture guards
+
+```text
+2026-09-06 automated guards added (`tests/test_architecture_guards.py`, source-scan based, negative-tested
+with scratch violations): (1) core domain/application layers import no codex runtime or protocol modules,
+with relative imports resolved so `from ..codex` cannot hide (AGENTS.md §15); (2) no core Python surface
+imports or string-references a wholehouse package (§1); (3) product runtime sources — main.py, workbench
+Python, static JS excluding vendored libraries, and editor pages — contain no raw/tree/codeload
+git-hosting fetch URLs, while plain upstream repository page links remain allowed (§29). Focused: PASS
+(4 tests); full regression: PASS (294 tests). Gate M items without automated coverage (provider-specific
+Canvas branches, legacy-monolith business additions, duplicate runtime initialization) remain review/
+inspection items.
+```
+
 ## 100 nodes
 
 ```text
