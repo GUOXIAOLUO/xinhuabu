@@ -115,10 +115,13 @@ and board-only drifts through the tested migration import path, and purging the
 test-artifact row through `purge_canvas_payload` with audit, the post-repair
 report `data/r4-repair-migration-report.json` shows authority `sqlite`, 23
 imported, 0 skipped, 23 comparisons, 0 differences, SQLite rows equal to Legacy
-files with zero divergent payloads. Running a legacy-routed server
-(`WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED=false`) while SQLite authority is
-active is now a known split-brain hazard and must not be used for normal product
-work.
+files with zero divergent payloads. An isolated restart read on `127.0.0.1:3012`
+verified the repaired database through normal SQLite routing: 17 active Canvas
+records, no phantom `baseline` entry, the imported orphan readable with its two
+nodes, and the repaired Classic record's canonical metadata intact. Running a
+legacy-routed server (`WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED=false`) while
+SQLite authority is active is now a known split-brain hazard and must not be used
+for normal product work.
 Editable-target detection for keyboard/drag guards now shares its base DOM
 semantics; Smart supplies its retained prompt-control selector while Classic keeps
 its existing narrower selector behavior.

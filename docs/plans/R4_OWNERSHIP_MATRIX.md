@@ -231,7 +231,10 @@ payload, the orphan and board-only drifts were converged through the tested migr
 zero divergent payloads and the orphan's two nodes present. R4 Gate items
 `source_count == canonical_count` / `skipped == 0` / `differences == 0` are re-established as of this
 repair; the general prohibition on running legacy-routed servers while SQLite authority is active is
-recorded in CURRENT_EXECUTION_STATUS.md.
+recorded in CURRENT_EXECUTION_STATUS.md. An isolated restart read on `127.0.0.1:3012` then listed 17
+active Canvases with no phantom `baseline` row, read the imported orphan with its two nodes and merged
+board position, and read the repaired Classic record's canonical metadata; the temporary service was
+stopped after the read-only check.
 ```
 
 ## Browser — new Canvas
