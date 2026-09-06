@@ -480,13 +480,20 @@ No new workflow transfer run in this inventory pass.
 ## 100 nodes
 
 ```text
-Not yet accepted.
+2026-09-06 visible-frame rerun on the current worktree (isolated server, disposable canonical records,
+`node_shell=1&legacy_renderer=1`, harness `interactions=1&visible=1`): 100 media-free Legacy Prompt
+nodes — render ready 265 ms, zoom 16.5 ms, pan 16.9 ms, minimap 33 ms, 3,645 target DOM elements,
+PASS. See `docs/benchmarks/canvas-node-shell-rerun-2026-09-06.md` for the full table and the 2026-09-04
+baseline comparison; all values are below the provisional 120 ms local alert.
 ```
 
 ## 300 nodes
 
 ```text
-Not yet accepted.
+2026-09-06 visible-frame rerun on the current worktree (same capture as above): 300 media-free Legacy
+Prompt nodes — render ready 191 ms, zoom 16.6 ms, pan 37.6 ms, minimap 28.9 ms, 9,445 target DOM
+elements, PASS. No interaction regression from the shared interaction-session changes; the offscreen
+minimap cadence P2 follow-up remains recorded.
 ```
 
 ---
