@@ -474,7 +474,18 @@ No new rollback run in this inventory pass.
 ## Workflow import/export
 
 ```text
-No new workflow transfer run in this inventory pass.
+2026-09-06 isolated round-trip parity run `127.0.0.1:3017` (process-local copy of the local SQLite
+database): on the Classic fixture `7ed83bf56f234d77a9e67ae1f6496577`, all six nodes were selected
+through the migrated `applyCanvasRuntimeSelection` command, the page-owned `selectedWorkflowPayload`
+projection produced a 6-node/6-connection workflow, and the shared transfer client exported it through
+the real `/api/canvas-workflows/export` endpoint with resources (1,313-byte archive). The full page
+import path (`importWorkflowFile` → shared import endpoint → `normalizeImported` → shared
+`materializeImportedSubgraph` → append/render/save) then appended exactly 6 nodes and 6 connections
+with an identical node-type multiset, remapped ids, auto-selection of the imported subgraph, and a
+relative geometry exactly equal to the original bounding box under one uniform offset. After reload the
+canvas persisted 12 nodes / 12 connections with all 12 cards NodeShell-rendered and the correct
+semantic indicator. No console errors surfaced; the temporary server and database copy were stopped and
+removed after the check. Smart retains no workflow transfer UI, so parity is a Classic/Unified surface.
 ```
 
 ## 100 nodes
