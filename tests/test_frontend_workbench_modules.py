@@ -1629,7 +1629,7 @@ console.log(JSON.stringify({{
         self.assertIn("command-registry.js?v=2026.09.06.6", page)
         self.assertIn("creation-catalog.js?v=2026.09.04.1", page)
         self.assertIn("generation-intent.js?v=2026.09.04.1", page)
-        self.assertIn("smart-canvas.js?v=2026.09.06.9", page)
+        self.assertIn("smart-canvas.js?v=2026.09.06.10", page)
 
     def test_smart_node_inspector_sections_are_ephemeral_and_collapsible(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
@@ -2149,26 +2149,31 @@ console.log(JSON.stringify({{
         self.assertIn("['play', 'playing', 'pause', 'ended']", controls)
         self.assertIn("['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'wheel']", controls)
 
-    def test_semantic_zoom_mount_is_explicit_local_and_covers_node_shell_and_legacy_nodes(self):
+    def test_semantic_zoom_application_is_shared_and_screen_space_controls_stay_smart_local(self):
         smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        apply_owner = (ROOT / "static" / "js" / "workbench" / "canvas" / "semantic-zoom-apply.js").read_text(encoding="utf-8")
         styles = (ROOT / "static" / "css" / "smart-canvas.css").read_text(encoding="utf-8")
         policy = (ROOT / "static" / "js" / "workbench" / "canvas" / "semantic-zoom.js").read_text(encoding="utf-8")
         self.assertIn("function nodeShellSemanticZoomEnabled()", smart)
         self.assertIn("params.get('semantic_zoom') !== '0'", smart)
         self.assertIn("params.get('node_shell') !== '0'", smart)
         self.assertIn("WorkbenchSemanticZoom.viewModel(node, viewport.scale)", smart)
-        self.assertIn("setAttribute('data-semantic-presentation', model.presentation)", smart)
         self.assertIn("applyNodeShellSemanticZoom();", smart)
         self.assertIn("semanticZoomIndicator", smart)
-        self.assertIn("Math.round(viewport.scale * 100)", smart)
-        self.assertIn("${shells.length} 节点", smart)
-        self.assertIn("setVisible(slots.content, model.showContent)", smart)
-        self.assertIn("port.hidden = !model.showPorts", smart)
-        self.assertIn("port.style.display = model.showPorts ? '' : 'none'", smart)
+        self.assertIn("count: shells.length", smart)
+        self.assertIn("WorkbenchSemanticZoomApply.ensureIndicator", smart)
+        self.assertIn("WorkbenchSemanticZoomApply.applyShellPresentation", smart)
+        self.assertIn("WorkbenchSemanticZoomApply.resetShellPresentation", smart)
+        self.assertIn("WorkbenchSemanticZoomApply.applyLegacyPresentation", smart)
+        self.assertIn("WorkbenchSemanticZoomApply.resetLegacyPresentation", smart)
         self.assertIn("function applyLegacySmartSemanticZoom(enabled)", smart)
         self.assertIn(".image-node:not(.node-shell-mounted)", smart)
         self.assertIn("smartActions:nodeEl.querySelector(':scope > .smart-node-floating-menu')", smart)
         self.assertIn("shellEl.closest('.image-node')?.querySelectorAll(':scope > .smart-node-floating-menu, :scope > .floating-node-actions')", smart)
+        self.assertIn("dataset.semanticPresentation = model.presentation", apply_owner)
+        self.assertIn("Math.round(Number(settings.scale) * 100)", apply_owner)
+        self.assertIn("setVisible(slots.status, model.showSummary, 'inline')", apply_owner)
+        self.assertIn("setVisible(slots.content, model.showContent)", apply_owner)
         self.assertIn("Object.freeze(['full', 'summary'])", policy)
         self.assertIn("scale >= 0.75 ? 'full' : 'summary'", policy)
         self.assertIn('width:190px', styles)
@@ -2180,6 +2185,121 @@ console.log(JSON.stringify({{
         self.assertIn("WorkbenchScreenSpaceControls.controlViewModel", smart)
         self.assertIn("--screen-space-port-size", styles)
         self.assertIn("--screen-space-toolbar-scale", styles)
+
+    def test_semantic_zoom_presentation_is_applied_by_one_shared_owner(self):
+        apply_owner = ROOT / "static" / "js" / "workbench" / "canvas" / "semantic-zoom-apply.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const sandbox = {{
+  window: {{}},
+  document: {{
+    createElement: () => ({{
+      attrs: {{}}, children: [], className: '', textContent: '', value: '',
+      setAttribute(key, val) {{ this.attrs[key] = val; }},
+      appendChild(child) {{ this.children.push(child); }},
+    }}),
+  }},
+}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(apply_owner))}, 'utf8'), sandbox);
+const A = sandbox.window.WorkbenchSemanticZoomApply;
+const makeEl = () => ({{
+  dataset: {{}}, hidden: null,
+  style: {{ display: null, removed: [], removeProperty(name) {{ this.removed.push(name); }} }},
+}});
+const SLOT = {{
+  '.workbench-node-shell__title': 'title', '.workbench-node-shell__status': 'status',
+  '.workbench-node-shell__actions': 'actions', '.workbench-node-shell__content': 'content',
+  '.workbench-node-shell__toolbar': 'toolbar', '.workbench-node-shell__footer': 'footer',
+}};
+const makeShell = () => {{
+  const slots = {{}};
+  Object.values(SLOT).forEach(name => {{ slots[name] = makeEl(); }});
+  const shellEl = {{ dataset: {{}}, querySelector: sel => slots[SLOT[sel]] || null }};
+  return {{ shellEl, slots }};
+}};
+const full = {{presentation:'full', showTitle:true, showSummary:false, showContent:true, showControls:true, showPorts:true}};
+const summary = {{presentation:'summary', showTitle:true, showSummary:true, showContent:false, showControls:false, showPorts:true}};
+const shellFull = makeShell();
+const outerFull = makeEl();
+const portA = makeEl();
+A.applyShellPresentation({{shellEl: shellFull.shellEl, outerEl: outerFull, model: full, portElements: [portA]}});
+const shellApplied = shellFull.shellEl.dataset.semanticPresentation === 'full'
+  && shellFull.shellEl.dataset.semanticControls === 'true'
+  && shellFull.shellEl.dataset.semanticPorts === 'true'
+  && outerFull.dataset.semanticPresentation === 'full';
+const fullVisible = shellFull.slots.content.hidden === false && shellFull.slots.content.style.display === '';
+const statusHiddenInFull = shellFull.slots.status.hidden === true && shellFull.slots.status.style.display === 'none';
+const controlsVisibleInFull = shellFull.slots.toolbar.hidden === false && portA.hidden === false;
+
+const shellSummary = makeShell();
+const portB = makeEl();
+A.applyShellPresentation({{shellEl: shellSummary.shellEl, model: summary, portElements: [portB]}});
+const summaryHidden = shellSummary.slots.content.hidden === true && shellSummary.slots.content.style.display === 'none';
+const summaryStatusInline = shellSummary.slots.status.hidden === false && shellSummary.slots.status.style.display === 'inline';
+const summaryControlsHidden = shellSummary.slots.actions.hidden === true && shellSummary.slots.footer.hidden === true;
+
+A.resetShellPresentation({{shellEl: shellFull.shellEl, outerEl: outerFull, portElements: [portA]}});
+const shellReset = !('semanticPresentation' in shellFull.shellEl.dataset)
+  && !('semanticControls' in shellFull.shellEl.dataset)
+  && !('semanticPresentation' in outerFull.dataset)
+  && shellFull.slots.content.hidden === false
+  && shellFull.slots.content.style.removed.includes('display')
+  && portA.hidden === false;
+
+const legacyNode = makeEl();
+const head = makeEl();
+const body = makeEl();
+const resize = makeEl();
+const legacyPort = makeEl();
+A.applyLegacyPresentation({{nodeEl: legacyNode, model: full, targets: {{head, body, resize}}, portElements: [legacyPort], headDisplay: 'flex'}});
+const legacyApplied = legacyNode.dataset.semanticPresentation === 'full'
+  && head.hidden === false && head.style.display === 'flex'
+  && body.hidden === false
+  && resize.hidden === false
+  && legacyPort.hidden === false;
+A.applyLegacyPresentation({{nodeEl: legacyNode, model: summary, targets: {{head, body, resize}}, portElements: [legacyPort]}});
+const legacySummary = head.hidden === false && head.style.display === ''
+  && body.hidden === true && body.style.display === 'none'
+  && resize.hidden === true;
+
+const hint = makeEl();
+A.resetLegacyPresentation({{nodeEl: legacyNode, targets: {{head, body, hint}}, portElements: [legacyPort]}});
+const legacyReset = !('semanticPresentation' in legacyNode.dataset)
+  && body.hidden === false && body.style.removed.includes('display')
+  && hint.hidden === false && head.hidden === false;
+
+const container = {{ appended: [], querySelector(sel) {{ return this.appended.find(child => `#${{child.id}}` === sel) || null; }}, appendChild(child) {{ this.appended.push(child); }} }};
+const indicator = A.ensureIndicator({{
+  container, id: 'zoomIndicator', className: 'zoom-indicator', scale: 0.65,
+  presentation: 'summary', labels: {{full:'完整', summary:'摘要'}}, count: 2,
+}});
+const indicatorBuilt = indicator.id === 'zoomIndicator' && indicator.className === 'zoom-indicator'
+  && indicator.attrs['aria-live'] === 'polite' && indicator.value === '65'
+  && indicator.textContent === '65% · 摘要 · 2 节点'
+  && container.appended.length === 1;
+const updated = A.ensureIndicator({{
+  container, id: 'zoomIndicator', className: 'zoom-indicator', scale: 1,
+  presentation: 'full', labels: {{full:'完整', summary:'摘要'}}, count: 6,
+}});
+const indicatorUpdated = container.appended.length === 1 && updated.textContent === '100% · 完整 · 6 节点'
+  && updated.value === '100';
+
+console.log(JSON.stringify({{shellApplied, fullVisible, statusHiddenInFull, controlsVisibleInFull, summaryHidden, summaryStatusInline, summaryControlsHidden, shellReset, legacyApplied, legacySummary, legacyReset, indicatorBuilt, indicatorUpdated}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        payload = json.loads(result.stdout)
+        for key in ("shellApplied", "fullVisible", "statusHiddenInFull", "controlsVisibleInFull",
+                    "summaryHidden", "summaryStatusInline", "summaryControlsHidden", "shellReset",
+                    "legacyApplied", "legacySummary", "legacyReset", "indicatorBuilt", "indicatorUpdated"):
+            self.assertTrue(payload[key], key)
+
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            text = (ROOT / "static" / page).read_text(encoding="utf-8")
+            apply_tag = text.index("workbench/canvas/semantic-zoom-apply.js")
+            self.assertLess(text.index("workbench/canvas/semantic-zoom.js"), apply_tag)
+            self.assertLess(apply_tag, text.index(editor))
+
 
     def test_node_shell_mount_is_explicit_and_supports_smart_groups(self):
         smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
@@ -2205,7 +2325,7 @@ console.log(JSON.stringify({{
         self.assertIn("function admits(policy, node)", admission)
         self.assertIn("renderer-admission.js?v=2026.09.06.1", page)
         self.assertIn(".image-node.legacy-renderer-mounted > .floating-node-actions", styles)
-        self.assertIn("smart-canvas.js?v=2026.09.06.9", page)
+        self.assertIn("smart-canvas.js?v=2026.09.06.10", page)
 
     def test_classic_output_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
@@ -2477,7 +2597,8 @@ console.log(JSON.stringify({{
         self.assertIn("function canvasNodeShellSemanticZoomEnabled()", classic)
         self.assertIn("params.get('semantic_zoom') !== '0'", classic)
         self.assertIn("WorkbenchSemanticZoom.viewModel(node, viewport.scale)", classic)
-        self.assertIn("nodeEl.dataset.semanticPresentation = model.presentation", classic)
+        self.assertIn("WorkbenchSemanticZoomApply.applyShellPresentation", classic)
+        self.assertIn("WorkbenchSemanticZoomApply.applyLegacyPresentation", classic)
         self.assertIn(".node:not(.node-shell-mounted)", classic)
         self.assertIn("canvasSemanticZoomIndicator", classic)
         self.assertIn("WorkbenchUnifiedRenderHost.mount", classic)
@@ -2503,7 +2624,7 @@ console.log(JSON.stringify({{
         self.assertIn("command-registry.js?v=2026.09.06.6", page)
         self.assertIn("creation-catalog.js?v=2026.09.04.1", page)
         self.assertIn("generation-intent.js?v=2026.09.04.1", page)
-        self.assertIn("canvas.js?v=2026.09.06.11", page)
+        self.assertIn("canvas.js?v=2026.09.06.12", page)
         self.assertIn("WorkbenchUnifiedRenderHost.cardShellView({selected:selected.has(node.id), onIntent:handleCanvasNodeShellIntent})", classic)
         self.assertIn("const canvasNodeShellIntentAdapter = window.WorkbenchUnifiedRenderHost.createIntentAdapter({", classic)
         self.assertIn("delete:intent => deleteNodeFromButton(intent.nodeId)", classic)

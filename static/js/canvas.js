@@ -1168,58 +1168,41 @@ function applyCanvasNodeShellSemanticZoom(){
         existingIndicator?.remove();
         return;
     }
-    const setVisible = (element, visible, visibleDisplay='') => {
-        if(!element) return;
-        element.hidden = !visible;
-        element.style.display = visible ? visibleDisplay : 'none';
-    };
     const presentation = window.WorkbenchSemanticZoom.presentationForScale(viewport.scale);
-    const labels = {full:'完整', summary:'摘要'};
-    const indicator = existingIndicator || document.createElement('output');
-    indicator.id = 'canvasSemanticZoomIndicator';
-    indicator.className = 'canvas-semantic-zoom-indicator';
-    indicator.setAttribute('aria-live', 'polite');
-    indicator.value = String(Math.round(viewport.scale * 100));
-    indicator.textContent = `${Math.round(viewport.scale * 100)}% · ${labels[presentation] || presentation} · ${nodes.length} 节点`;
-    if(!existingIndicator) shell.appendChild(indicator);
+    window.WorkbenchSemanticZoomApply.ensureIndicator({
+        container: shell,
+        id: 'canvasSemanticZoomIndicator',
+        className: 'canvas-semantic-zoom-indicator',
+        scale: viewport.scale,
+        presentation,
+        labels: {full:'完整', summary:'摘要'},
+        count: nodes.length,
+    });
     nodesEl.querySelectorAll('.node.node-shell-mounted').forEach(nodeEl => {
         const shellEl = nodeEl.querySelector('.workbench-node-shell');
         const node = nodes.find(item => item.id === nodeEl.dataset.id);
         if(!shellEl || !node) return;
-        const slots = {
-            title:shellEl.querySelector('.workbench-node-shell__title'),
-            status:shellEl.querySelector('.workbench-node-shell__status'),
-            actions:shellEl.querySelector('.workbench-node-shell__actions'),
-            content:shellEl.querySelector('.workbench-node-shell__content'),
-            toolbar:shellEl.querySelector('.workbench-node-shell__toolbar'),
-            footer:shellEl.querySelector('.workbench-node-shell__footer'),
-        };
-        const model = window.WorkbenchSemanticZoom.viewModel(node, viewport.scale);
-        nodeEl.dataset.semanticPresentation = model.presentation;
-        shellEl.dataset.semanticPresentation = model.presentation;
-        shellEl.dataset.semanticControls = String(model.showControls);
-        shellEl.dataset.semanticPorts = String(model.showPorts);
-        setVisible(slots.title, model.showTitle);
-        setVisible(slots.status, model.showSummary, 'inline');
-        setVisible(slots.content, model.showContent);
-        [slots.actions, slots.toolbar, slots.footer].forEach(slot => setVisible(slot, model.showControls));
-        nodeEl.querySelectorAll(':scope > .workbench-node-shell__port').forEach(port => setVisible(port, model.showPorts));
+        window.WorkbenchSemanticZoomApply.applyShellPresentation({
+            shellEl,
+            outerEl: nodeEl,
+            model: window.WorkbenchSemanticZoom.viewModel(node, viewport.scale),
+            portElements: [...nodeEl.querySelectorAll(':scope > .workbench-node-shell__port')],
+        });
     });
     nodesEl.querySelectorAll('.node:not(.node-shell-mounted)').forEach(nodeEl => {
         const node = nodes.find(item => item.id === nodeEl.dataset.id);
         if(!node) return;
-        const targets = {
-            head:nodeEl.querySelector(':scope > .node-head'),
-            body:nodeEl.querySelector(':scope > .node-body'),
-            resize:nodeEl.querySelector(':scope > .resize-handle'),
-        };
-        const ports = [...nodeEl.querySelectorAll(':scope > .port')];
-        const model = window.WorkbenchSemanticZoom.viewModel(node, viewport.scale);
-        nodeEl.dataset.semanticPresentation = model.presentation;
-        setVisible(targets.head, model.showTitle, 'flex');
-        setVisible(targets.body, model.showContent);
-        setVisible(targets.resize, model.showControls);
-        ports.forEach(port => setVisible(port, model.showPorts));
+        window.WorkbenchSemanticZoomApply.applyLegacyPresentation({
+            nodeEl,
+            model: window.WorkbenchSemanticZoom.viewModel(node, viewport.scale),
+            targets: {
+                head:nodeEl.querySelector(':scope > .node-head'),
+                body:nodeEl.querySelector(':scope > .node-body'),
+                resize:nodeEl.querySelector(':scope > .resize-handle'),
+            },
+            portElements: [...nodeEl.querySelectorAll(':scope > .port')],
+            headDisplay: 'flex',
+        });
     });
 }
 function estimatedNodeRect(n){

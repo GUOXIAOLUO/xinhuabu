@@ -2629,89 +2629,45 @@ function applyNodeShellSemanticZoom(){
     if(!enabled){
         existingIndicator?.remove();
         world.querySelectorAll('.image-node.node-shell-mounted .workbench-node-shell').forEach(shellEl => {
-            ['semanticPresentation', 'semanticControls', 'semanticPorts'].forEach(key => delete shellEl.dataset[key]);
-            delete shellEl.closest('.image-node')?.dataset.semanticPresentation;
-            const slots = {
-                title:shellEl.querySelector('.workbench-node-shell__title'),
-                status:shellEl.querySelector('.workbench-node-shell__status'),
-                actions:shellEl.querySelector('.workbench-node-shell__actions'),
-                content:shellEl.querySelector('.workbench-node-shell__content'),
-                toolbar:shellEl.querySelector('.workbench-node-shell__toolbar'),
-                footer:shellEl.querySelector('.workbench-node-shell__footer'),
-            };
-            Object.values(slots).forEach(slot => {
-                if(!slot) return;
-                slot.hidden = false;
-                slot.style.removeProperty('display');
-            });
-            nodeShellPortElements(shellEl).forEach(port => {
-                port.hidden = false;
-                port.style.removeProperty('display');
-            });
-            shellEl.closest('.image-node')?.querySelectorAll(':scope > .smart-node-floating-menu, :scope > .floating-node-actions').forEach(menu => {
-                menu.hidden = false;
-                menu.style.removeProperty('display');
+            window.WorkbenchSemanticZoomApply.resetShellPresentation({
+                shellEl,
+                outerEl: shellEl.closest('.image-node'),
+                portElements: nodeShellPortElements(shellEl),
+                menuElements: shellEl.closest('.image-node')?.querySelectorAll(':scope > .smart-node-floating-menu, :scope > .floating-node-actions'),
             });
         });
         applyLegacySmartSemanticZoom(false);
         return;
     }
     const presentation = window.WorkbenchSemanticZoom.presentationForScale(viewport.scale);
-    const labels = {full:'完整', summary:'摘要'};
-    const indicator = existingIndicator || document.createElement('output');
-    indicator.id = 'semanticZoomIndicator';
-    indicator.className = 'semantic-zoom-indicator';
-    indicator.setAttribute('aria-live', 'polite');
-    indicator.value = String(Math.round(viewport.scale * 100));
     const shells = [...world.querySelectorAll('.image-node.node-shell-mounted .workbench-node-shell')];
-    indicator.textContent = `${Math.round(viewport.scale * 100)}% · ${labels[presentation] || presentation} · ${shells.length} 节点`;
-    if(!existingIndicator) shell.appendChild(indicator);
+    window.WorkbenchSemanticZoomApply.ensureIndicator({
+        container: shell,
+        id: 'semanticZoomIndicator',
+        className: 'semantic-zoom-indicator',
+        scale: viewport.scale,
+        presentation,
+        labels: {full:'完整', summary:'摘要'},
+        count: shells.length,
+    });
     shells.forEach(shellEl => {
         const node = nodes.find(item => item.id === shellEl.dataset.nodeId);
         if(!node) return;
         const model = window.WorkbenchSemanticZoom.viewModel(node, viewport.scale);
-        shellEl.dataset.semanticPresentation = model.presentation;
-        shellEl.closest('.image-node')?.setAttribute('data-semantic-presentation', model.presentation);
-        shellEl.dataset.semanticControls = String(model.showControls);
-        shellEl.dataset.semanticPorts = String(model.showPorts);
-        const slots = {
-            title:shellEl.querySelector('.workbench-node-shell__title'),
-            status:shellEl.querySelector('.workbench-node-shell__status'),
-            actions:shellEl.querySelector('.workbench-node-shell__actions'),
-            content:shellEl.querySelector('.workbench-node-shell__content'),
-            toolbar:shellEl.querySelector('.workbench-node-shell__toolbar'),
-            footer:shellEl.querySelector('.workbench-node-shell__footer'),
-        };
-        const setVisible = (slot, visible, visibleDisplay='') => {
-            if(!slot) return;
-            slot.hidden = !visible;
-            slot.style.display = visible ? visibleDisplay : 'none';
-        };
-        setVisible(slots.title, model.showTitle);
-        if(slots.status){
-            const showSummary = model.presentation === 'summary';
-            setVisible(slots.status, showSummary, 'inline');
-        }
-        setVisible(slots.content, model.showContent);
-        [slots.actions, slots.toolbar, slots.footer].forEach(slot => {
-            setVisible(slot, model.showControls);
+        const nodeEl = shellEl.closest('.image-node');
+        window.WorkbenchSemanticZoomApply.applyShellPresentation({
+            shellEl,
+            outerEl: nodeEl,
+            model,
+            portElements: nodeShellPortElements(shellEl),
         });
-        shellEl.closest('.image-node')?.querySelectorAll(':scope > .smart-node-floating-menu, :scope > .floating-node-actions').forEach(menu => {
-            setVisible(menu, model.showControls);
-        });
-        nodeShellPortElements(shellEl).forEach(port => {
-            port.hidden = !model.showPorts;
-            port.style.display = model.showPorts ? '' : 'none';
+        nodeEl?.querySelectorAll(':scope > .smart-node-floating-menu, :scope > .floating-node-actions').forEach(menu => {
+            window.WorkbenchSemanticZoomApply.setVisible(menu, model.showControls);
         });
     });
     applyLegacySmartSemanticZoom(enabled);
 }
 function applyLegacySmartSemanticZoom(enabled){
-    const setVisible = (element, visible, visibleDisplay='') => {
-        if(!element) return;
-        element.hidden = !visible;
-        element.style.display = visible ? visibleDisplay : 'none';
-    };
     world.querySelectorAll('.image-node:not(.node-shell-mounted)').forEach(nodeEl => {
         const node = nodes.find(item => item.id === nodeEl.dataset.id);
         if(!node) return;
@@ -2725,24 +2681,14 @@ function applyLegacySmartSemanticZoom(enabled){
         };
         const ports = [...nodeEl.querySelectorAll(':scope > .node-port')];
         if(!enabled){
-            delete nodeEl.dataset.semanticPresentation;
-            Object.values(targets).forEach(element => {
-                if(!element) return;
-                element.hidden = false;
-                element.style.removeProperty('display');
-            });
-            ports.forEach(port => { port.hidden = false; port.style.removeProperty('display'); });
+            window.WorkbenchSemanticZoomApply.resetLegacyPresentation({nodeEl, targets, portElements: ports});
             return;
         }
         const model = window.WorkbenchSemanticZoom.viewModel(node, viewport.scale);
-        nodeEl.dataset.semanticPresentation = model.presentation;
-        setVisible(targets.head, model.showTitle);
-        setVisible(targets.body, model.showContent);
-        setVisible(targets.hint, model.presentation === 'summary');
-        setVisible(targets.floatingActions, model.showControls);
-        setVisible(targets.smartActions, model.showControls);
-        setVisible(targets.resize, model.showControls);
-        ports.forEach(port => setVisible(port, model.showPorts));
+        window.WorkbenchSemanticZoomApply.applyLegacyPresentation({nodeEl, model, targets, portElements: ports});
+        window.WorkbenchSemanticZoomApply.setVisible(targets.hint, model.presentation === 'summary');
+        window.WorkbenchSemanticZoomApply.setVisible(targets.floatingActions, model.showControls);
+        window.WorkbenchSemanticZoomApply.setVisible(targets.smartActions, model.showControls);
     });
 }
 function screenToWorld(event){
