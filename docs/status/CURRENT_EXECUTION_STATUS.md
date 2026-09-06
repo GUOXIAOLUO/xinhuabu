@@ -147,6 +147,14 @@ conflict-resolution and remote-apply policies; the documented migration order is
 revision mirror first, then scheduling/coalescing, then conflict detection, then
 remote-apply scheduling. This characterization changes no product behavior and is
 the prerequisite for the polling, normal-connect, and viewport ownership rows.
+
+R4 save-coordinator unit 1 (2026-09-06): revision adoption after versioned writes
+now has one shared owner — `WorkbenchCanvasPersistence.adoptRevision`. All 26
+adoption sites in both adapters delegate to it, preserving each site's exact
+fallback chain (Classic's `Date.now()` sites and Smart's `Date.now()`/`0` split),
+and Classic's dual revision mirror is kept coherent by the shared owner instead
+of per-site discipline. Sandbox tests pin the adoption chain and per-adapter call
+counts; the full regression passes at 284 tests.
 Editable-target detection for keyboard/drag guards now shares its base DOM
 semantics; Smart supplies its retained prompt-control selector while Classic keeps
 its existing narrower selector behavior.

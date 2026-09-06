@@ -286,6 +286,14 @@ with adapter payload projection; (3) shared 409 detection with adapter conflict 
 remote-apply scheduling with adapter apply policy; (5) only then, polling eligibility and normal-connect
 commit can move without double writes.
 
+Migration unit (1) complete (2026-09-06): `WorkbenchCanvasPersistence.adoptRevision` now owns the
+versioned-write revision adoption chain (positive server revision, else keep current, else explicit
+fallback). All 26 adoption sites delegate to it — Classic's 10 paired position/delete sites and 8
+`onRevision` creation commits (which keep `lastCanvasUpdatedAt` and `canvas.updated_at` coherent through
+the single owner), plus Smart's 4 position and 4 delete sites with their preserved per-site fallbacks
+(`Date.now()` for position, `0` for delete). A sandbox test pins the adoption chain and source assertions
+pin the exact call counts; JS syntax and the full regression (284 tests) pass. Read-only mutation-path
+browser evidence is deferred to unit (2), which touches the save scheduling those paths exercise.
 ```
 
 ## Browser — new Canvas
