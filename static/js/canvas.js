@@ -2558,7 +2558,7 @@ async function addVersionedBlankImageNode(point){
         const node = window.WorkbenchNodeClient.applyCreationResult(result, {
             nodes, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas,
             projectNode:created => ({id:created.id, type:'image', x:p.x, y:p.y, url:'', name:created.title || '空白图片'}),
-            onRevision:revision => { lastCanvasUpdatedAt = revision; },
+            onRevision:revision => { lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, revision); },
         });
         render();
         return node;
@@ -2583,7 +2583,7 @@ async function addVersionedBlankPromptNode(point){
         const node = window.WorkbenchNodeClient.applyCreationResult(result, {
             nodes, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas,
             projectNode:created => ({id:created.id, type:'prompt', x:p.x, y:p.y, text:''}),
-            onRevision:revision => { lastCanvasUpdatedAt = revision; },
+            onRevision:revision => { lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, revision); },
         });
         render();
         return node;
@@ -2608,7 +2608,7 @@ async function addVersionedBlankLoopNode(point){
         const node = window.WorkbenchNodeClient.applyCreationResult(result, {
             nodes, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas,
             projectNode:created => ({id:created.id, type:'loop', x:p.x, y:p.y, count:3, mode:'serial', showPrompt:false, imageInput:false, videoInput:false, loopStart:1, imageBatchSize:1, videoBatchSize:1, variablePrompt:'', fixedPrompt:''}),
-            onRevision:revision => { lastCanvasUpdatedAt = revision; },
+            onRevision:revision => { lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, revision); },
         });
         render();
         return node;
@@ -2659,7 +2659,7 @@ async function addVersionedBlankGroupNode(point){
         const node = window.WorkbenchNodeClient.applyCreationResult(result, {
             nodes, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas,
             projectNode:created => ({id:created.id, type:'group', x:p.x, y:p.y, w:300, h:220, items:[]}),
-            onRevision:revision => { lastCanvasUpdatedAt = revision; },
+            onRevision:revision => { lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, revision); },
         });
         render();
         return node;
@@ -2683,7 +2683,7 @@ async function addVersionedBlankOutputNode(point){
         const node = window.WorkbenchNodeClient.applyCreationResult(result, {
             nodes, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas,
             projectNode:created => ({id:created.id, type:'output', x:p.x, y:p.y, images:[]}),
-            onRevision:revision => { lastCanvasUpdatedAt = revision; },
+            onRevision:revision => { lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, revision); },
         });
         render();
         return node;
@@ -3805,7 +3805,7 @@ async function createVersionedLinkedGroup(state, origin){
             nodes, connections, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas,
             projectNode:created => ({id:created.id, type:'group', x:state.point.x, y:state.point.y, w:300, h:220, items:[]}),
             projectEdge:edge => ({id:edge.id, from:edge.from.node_id, to:edge.to.node_id}),
-            onRevision:revision => { lastCanvasUpdatedAt = revision; },
+            onRevision:revision => { lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, revision); },
             onAfterCommit:(_node, edge) => {
                 syncLatestGeneratedOutputToConnection(edge.from, edge.to);
                 syncGeneratorInputs();
@@ -3833,7 +3833,7 @@ async function createVersionedLinkedImage(state, origin){
             nodes, connections, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas,
             projectNode:created => ({id:created.id, type:'image', x:state.point.x, y:state.point.y, name:created.title || 'Image', mediaKind:'image'}),
             projectEdge:edge => ({id:edge.id, from:edge.from.node_id, to:edge.to.node_id}),
-            onRevision:revision => { lastCanvasUpdatedAt = revision; },
+            onRevision:revision => { lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, revision); },
             onAfterCommit:(_node, edge) => {
                 syncLatestGeneratedOutputToConnection(edge.from, edge.to);
                 syncGeneratorInputs();
@@ -3863,7 +3863,7 @@ async function createVersionedLinkedClassicNode(state, origin, definition){
         }, CLIENT_ID);
         window.WorkbenchNodeClient.applyGraphCreationResult(result, {
             nodes, connections, undoStack, undoSnapshot, undoLimit:UNDO_MAX, canvas, projectNode:definition.projectNode,
-            projectEdge:edge => ({id:edge.id, from:edge.from.node_id, to:edge.to.node_id}), onRevision:revision => { lastCanvasUpdatedAt = revision; },
+            projectEdge:edge => ({id:edge.id, from:edge.from.node_id, to:edge.to.node_id}), onRevision:revision => { lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, revision); },
             onAfterCommit:(_node, edge) => { syncLatestGeneratedOutputToConnection(edge.from, edge.to); syncGeneratorInputs(); },
         });
         render();
@@ -13622,8 +13622,7 @@ async function commitVersionedBlankImagePosition(drag){
             expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
             position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
         }, CLIENT_ID);
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now());
     } catch(error) {
         // Position is a canonical expected-revision write. Revert the visual
         // optimistic move on failure instead of issuing a raw Canvas save.
@@ -13651,8 +13650,7 @@ async function commitVersionedBlankPromptPosition(drag){
             expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
             position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
         }, CLIENT_ID);
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now());
     } catch(error) {
         console.error('Versioned blank Prompt position update failed', error);
         node.x = drag.ox;
@@ -13692,8 +13690,7 @@ async function commitVersionedBlankLoopPosition(drag){
             expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
             position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
         }, CLIENT_ID);
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now());
     } catch(error) {
         console.error('Versioned blank Loop position update failed', error);
         node.x = drag.ox;
@@ -13714,8 +13711,7 @@ async function commitVersionedBlankOutputPosition(drag){
             expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
             position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
         }, CLIENT_ID);
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now());
     } catch(error) {
         console.error('Versioned blank Output position update failed', error);
         node.x = drag.ox;
@@ -13736,8 +13732,7 @@ async function commitVersionedEmptyGroupPosition(drag){
             expected_revision:Number(lastCanvasUpdatedAt || canvas.updated_at || 0),
             position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
         }, CLIENT_ID);
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now());
     } catch(error) {
         console.error('Versioned empty Group position update failed', error);
         node.x = drag.ox;
@@ -13769,8 +13764,7 @@ async function deleteVersionedBlankImageNode(id){
         selected.delete(node.id);
         undoStack.push(undoSnapshot);
         if(undoStack.length > UNDO_MAX) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now());
         render();
     } catch(error) {
         // A stale or rejected service mutation must not fall through to a raw
@@ -13794,8 +13788,7 @@ async function deleteVersionedBlankPromptNode(id){
         selected.delete(node.id);
         undoStack.push(undoSnapshot);
         if(undoStack.length > UNDO_MAX) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now());
         render();
     } catch(error) {
         console.error('Versioned blank Prompt deletion failed', error);
@@ -13817,8 +13810,7 @@ async function deleteVersionedBlankLoopNode(id){
         selected.delete(node.id);
         undoStack.push(undoSnapshot);
         if(undoStack.length > UNDO_MAX) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now());
         render();
     } catch(error) {
         console.error('Versioned blank Loop deletion failed', error);
@@ -13840,8 +13832,7 @@ async function deleteVersionedBlankOutputNode(id){
         selected.delete(node.id);
         undoStack.push(undoSnapshot);
         if(undoStack.length > UNDO_MAX) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now());
         render();
     } catch(error) {
         console.error('Versioned blank Output deletion failed', error);
@@ -13863,8 +13854,7 @@ async function deleteVersionedEmptyGroupNode(id){
         selected.delete(node.id);
         undoStack.push(undoSnapshot);
         if(undoStack.length > UNDO_MAX) undoStack.shift();
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
-        lastCanvasUpdatedAt = canvas.updated_at;
+        lastCanvasUpdatedAt = window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now());
         render();
     } catch(error) {
         console.error('Versioned empty Group deletion failed', error);

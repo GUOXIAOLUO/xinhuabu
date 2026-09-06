@@ -10705,7 +10705,7 @@ async function commitVersionedBlankSmartImagePosition(drag){
             expected_revision:Number(canvas.updated_at || 0),
             position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
         }, smartClientId);
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now());
         applySmartRuntimeNodeMove(node);
     } catch(error) {
         // A canonical expected-revision write must restore the optimistic move
@@ -10729,7 +10729,7 @@ async function commitVersionedEmptySmartGroupPosition(drag){
             expected_revision:Number(canvas.updated_at || 0),
             position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
         }, smartClientId);
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now());
         applySmartRuntimeNodeMove(node);
     } catch(error) {
         console.error('Versioned empty Smart Group position update failed', error);
@@ -10747,7 +10747,7 @@ async function commitVersionedDefaultSmartLoopPosition(drag){
     if(drag?.isLocalCopy || drag?.ctrlGroup || drag?.thumbDetached || (drag?.group || []).length !== 1 || !changed || !canUseVersionedDefaultSmartLoopDelete(node)) return false;
     try {
         const result = await window.WorkbenchNodeClient.update(canvas.id, node.id, {project_id:canvas.project, expected_revision:Number(canvas.updated_at || 0), position:{x:Number(node.x) || 0, y:Number(node.y) || 0}}, smartClientId);
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now());
         applySmartRuntimeNodeMove(node);
     } catch(error) {
         console.error('Versioned default Smart Loop position update failed', error);
@@ -10765,7 +10765,7 @@ async function commitVersionedBlankSmartPromptPosition(drag){
             expected_revision:Number(canvas.updated_at || 0),
             position:{x:Number(node.x) || 0, y:Number(node.y) || 0},
         }, smartClientId);
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || Date.now());
+        window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now());
         applySmartRuntimeNodeMove(node);
     } catch(error) {
         console.error('Versioned blank Smart Prompt position update failed', error);
@@ -10798,7 +10798,7 @@ async function deleteVersionedBlankSmartImageNode(id){
         selectedIds = selectedIds.filter(selected => selected !== node.id);
         if(selectedImage.nodeId === node.id) selectedImage = {nodeId:'', index:-1};
         undoStack.push(undoSnapshot);
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || 0);
+        window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, 0);
         render();
     } catch(error) {
         console.error('Versioned Smart Image deletion failed', error);
@@ -10820,7 +10820,7 @@ async function deleteVersionedEmptySmartGroupNode(id){
         if(selectedId === node.id) selectedId = '';
         selectedIds = selectedIds.filter(selected => selected !== node.id);
         undoStack.push(undoSnapshot);
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || 0);
+        window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, 0);
         render();
     } catch(error) {
         console.error('Versioned empty Smart Group deletion failed', error);
@@ -10838,7 +10838,7 @@ async function deleteVersionedDefaultSmartLoopNode(id){
         if(canvas) canvas.connections = (canvas.connections || []).filter(connection => connection.from !== node.id && connection.to !== node.id);
         if(selectedId === node.id) selectedId = '';
         selectedIds = selectedIds.filter(selected => selected !== node.id);
-        undoStack.push(undoSnapshot); canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || 0); render();
+        undoStack.push(undoSnapshot); window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, 0); render();
     } catch(error) { console.error('Versioned default Smart Loop deletion failed', error); toast(tr('smart.toastCanvasFail')); }
     return true;
 }
@@ -10856,7 +10856,7 @@ async function deleteVersionedBlankSmartPromptNode(id){
         if(selectedId === node.id) selectedId = '';
         selectedIds = selectedIds.filter(selected => selected !== node.id);
         undoStack.push(undoSnapshot);
-        canvas.updated_at = Number(result.canvas_revision || canvas.updated_at || 0);
+        window.WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, 0);
         render();
     } catch(error) {
         console.error('Versioned blank Smart Prompt deletion failed', error);

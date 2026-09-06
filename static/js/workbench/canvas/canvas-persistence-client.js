@@ -20,6 +20,17 @@
         };
     }
 
+    // One owner for adopting a server-provided Canvas revision after a versioned
+    // write: a positive server revision wins, the current revision is kept when
+    // the write returned none, and missingFallback covers a revision-less canvas.
+    function adoptRevision(canvas, revision, missingFallback) {
+        const value = Number(revision) || 0;
+        const current = Number(canvas && canvas.updated_at) || 0;
+        const adopted = value > 0 ? value : (current > 0 ? current : Number(missingFallback) || 0);
+        if (canvas) canvas.updated_at = adopted;
+        return adopted;
+    }
+
     global.WorkbenchCanvasPersistence = Object.freeze({
         load: canvasId => requestPath(canvasPath(canvasId), {method: 'GET'}),
         metadata: canvasId => requestPath(`${canvasPath(canvasId)}/meta`, {method: 'GET'}),
@@ -28,5 +39,6 @@
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(record),
         }),
+        adoptRevision,
     });
 }(window));

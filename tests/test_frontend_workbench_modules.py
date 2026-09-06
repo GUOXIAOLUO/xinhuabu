@@ -772,6 +772,48 @@ vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
             self.assertIn("WorkbenchCanvasPersistence", adapter)
             self.assertNotIn("fetch(`/api/canvases/", adapter)
 
+    def test_versioned_writes_adopt_revisions_through_one_shared_owner(self):
+        client = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-persistence-client.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(client))}, 'utf8'), sandbox);
+const adopt = sandbox.window.WorkbenchCanvasPersistence.adoptRevision;
+const newer = {{updated_at: 400}};
+const kept = {{updated_at: 400}};
+const seeded = {{}};
+const revisionless = {{}};
+console.log(JSON.stringify({{
+  newer: adopt(newer, 500),
+  newerStored: newer.updated_at,
+  keptCurrent: adopt(kept, 0, 12345),
+  keptStored: kept.updated_at,
+  seededValue: adopt(seeded, 0, 12345),
+  seededStored: seeded.updated_at,
+  revisionless: adopt(revisionless, 0, 0),
+  revisionlessStored: revisionless.updated_at,
+}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["newer"], 500)
+        self.assertEqual(payload["newerStored"], 500)
+        self.assertEqual(payload["keptCurrent"], 400)
+        self.assertEqual(payload["keptStored"], 400)
+        self.assertEqual(payload["seededValue"], 12345)
+        self.assertEqual(payload["seededStored"], 12345)
+        self.assertEqual(payload["revisionless"], 0)
+
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        self.assertNotIn("canvas.updated_at = Number(result.canvas_revision", classic)
+        self.assertNotIn("canvas.updated_at = Number(result.canvas_revision", smart)
+        self.assertEqual(classic.count("WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now())"), 10)
+        self.assertEqual(classic.count("WorkbenchCanvasPersistence.adoptRevision(canvas, revision)"), 8)
+        self.assertEqual(smart.count("WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now())"), 4)
+        self.assertEqual(smart.count("WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, 0)"), 4)
+
     def test_remote_sync_polls_canvas_metadata_through_adapter_callbacks(self):
         remote_sync = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-remote-sync.js"
         script = f"""
