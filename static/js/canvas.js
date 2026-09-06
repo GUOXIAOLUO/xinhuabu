@@ -15690,17 +15690,28 @@ function startNodeDrag(e, node){
         [...selected].forEach(id => collect(nodes.find(n => n.id === id)));
     }
     const children = [...collected.values()];
-    dragNode = {node: dragTarget, children, sx:e.clientX, sy:e.clientY, ox:dragTarget.x, oy:dragTarget.y, isLocalCopy:Boolean(e.altKey)};
+    const dragSession = canvasUnifiedRuntimeEnabled
+        ? window.WorkbenchCanvasRuntime?.createNodeDragSession?.({
+            start:{x:e.clientX, y:e.clientY},
+            scale:viewport.scale,
+            members:[{id:dragTarget.id, ox:dragTarget.x, oy:dragTarget.y}, ...children.map(child => ({id:child.node.id, ox:child.ox, oy:child.oy}))],
+        })
+        : null;
+    dragNode = {node: dragTarget, children, sx:e.clientX, sy:e.clientY, ox:dragTarget.x, oy:dragTarget.y, isLocalCopy:Boolean(e.altKey), dragSession};
     document.body.classList.add('canvas-node-drag');
     window.onmousemove = onNodeDrag;
     window.onmouseup = endDrag;
 }
 function onNodeDrag(e){
     if(!dragNode) return;
-    const dx = (e.clientX - dragNode.sx) / viewport.scale;
-    const dy = (e.clientY - dragNode.sy) / viewport.scale;
-    dragNode.node.x = dragNode.ox + dx;
-    dragNode.node.y = dragNode.oy + dy;
+    const drag = dragNode.dragSession?.move({x:e.clientX, y:e.clientY}, {scale:viewport.scale});
+    const sharedPositions = drag ? new Map(drag.positions.map(item => [item.id, item])) : null;
+    const dx = drag ? drag.dx : (e.clientX - dragNode.sx) / viewport.scale;
+    const dy = drag ? drag.dy : (e.clientY - dragNode.sy) / viewport.scale;
+    const dragPosition = (id, ox, oy) => sharedPositions?.get(id) || {x:ox + dx, y:oy + dy};
+    const mainPosition = dragPosition(dragNode.node.id, dragNode.ox, dragNode.oy);
+    dragNode.node.x = mainPosition.x;
+    dragNode.node.y = mainPosition.y;
     applyCanvasRuntimeNodeMove(dragNode.node);
     const el = nodesEl.querySelector(`.node[data-id="${dragNode.node.id}"]`);
     if(el){
@@ -15708,8 +15719,9 @@ function onNodeDrag(e){
         el.style.top = `${dragNode.node.y}px`;
     }
     (dragNode.children || []).forEach(childDrag => {
-        childDrag.node.x = childDrag.ox + dx;
-        childDrag.node.y = childDrag.oy + dy;
+        const childPosition = dragPosition(childDrag.node.id, childDrag.ox, childDrag.oy);
+        childDrag.node.x = childPosition.x;
+        childDrag.node.y = childPosition.y;
         applyCanvasRuntimeNodeMove(childDrag.node);
         const childEl = nodesEl.querySelector(`.node[data-id="${childDrag.node.id}"]`);
         if(childEl){

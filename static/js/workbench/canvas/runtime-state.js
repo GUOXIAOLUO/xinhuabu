@@ -86,6 +86,39 @@
         });
     }
 
+    function createNodeDragSession(options) {
+        const settings = options && typeof options === 'object' ? options : {};
+        const start = normalizePoint(settings.start);
+        const defaultScale = finite(settings.scale, 1) || 1;
+        const members = Object.freeze((Array.isArray(settings.members) ? settings.members : [])
+            .map(member => {
+                if (!member || typeof member !== 'object' || !member.id) return null;
+                return Object.freeze({
+                    id: String(member.id),
+                    ox: finite(member.ox, 0),
+                    oy: finite(member.oy, 0),
+                });
+            })
+            .filter(Boolean));
+        function positionsFor(dx, dy) {
+            return Object.freeze(members.map(member => Object.freeze({
+                id: member.id,
+                x: member.ox + dx,
+                y: member.oy + dy,
+            })));
+        }
+        return Object.freeze({
+            members,
+            move(point, moveOptions) {
+                const current = normalizePoint(point);
+                const scale = finite(moveOptions && moveOptions.scale, defaultScale) || 1;
+                const dx = (current.x - start.x) / scale;
+                const dy = (current.y - start.y) / scale;
+                return Object.freeze({dx, dy, positions: positionsFor(dx, dy)});
+            },
+        });
+    }
+
     function viewportScaleForWheel(viewport, deltaY, options) {
         const settings = options && typeof options === 'object' ? options : {};
         const current = normalizeViewport(viewport).scale;
@@ -283,6 +316,7 @@
         normalizeSelection,
         normalizeViewport,
         createViewportPanSession,
+        createNodeDragSession,
         viewportScaleForWheel,
         viewportCenteredOnWorldPoint,
         worldPointFromMinimapPointer,

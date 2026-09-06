@@ -1505,7 +1505,14 @@ function startSmartNodeDrag(nodeId, pointer){
         const item = nodes.find(candidate => candidate.id === dragId);
         return item ? {id:item.id, ox:Number(item.x) || 0, oy:Number(item.y) || 0} : null;
     }).filter(Boolean);
-    dragState = {id:node.id, startX:pointer.clientX, startY:pointer.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(pointer.ctrlKey), isLocalCopy:Boolean(pointer.altKey)};
+    const dragSession = smartUnifiedRuntimeEnabled
+        ? window.WorkbenchCanvasRuntime?.createNodeDragSession?.({
+            start:{x:pointer.clientX, y:pointer.clientY},
+            scale:viewport.scale,
+            members:group.map(item => ({id:item.id, ox:item.ox, oy:item.oy})),
+        })
+        : null;
+    dragState = {id:node.id, startX:pointer.clientX, startY:pointer.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(pointer.ctrlKey), isLocalCopy:Boolean(pointer.altKey), dragSession};
     document.body.classList.add('smart-node-drag');
     capturePendingUndo();
 }
@@ -18684,7 +18691,10 @@ window.onmousemove = e => {
                     selectedImage = {nodeId:'', index:-1};
                     const newNode = createImageNodeAt(point, [img], {select:false, skipUndo:true});
                     undoSuppressed = false;
-                    dragState = {id:newNode.id, startX:e.clientX, startY:e.clientY, ox:newNode.x, oy:newNode.y, thumbDetached:true};
+                    const detachSession = smartUnifiedRuntimeEnabled
+                        ? window.WorkbenchCanvasRuntime?.createNodeDragSession?.({start:{x:e.clientX, y:e.clientY}, scale:viewport.scale, members:[{id:newNode.id, ox:newNode.x, oy:newNode.y}]})
+                        : null;
+                    dragState = {id:newNode.id, startX:e.clientX, startY:e.clientY, ox:newNode.x, oy:newNode.y, thumbDetached:true, dragSession:detachSession};
                     thumbDragState.detached = true;
                     render();
                 }
@@ -18706,13 +18716,16 @@ window.onmousemove = e => {
     if(!dragState) return;
     const node = nodes.find(n => n.id === dragState.id);
     if(!node) return;
-    const moveDx = (e.clientX - dragState.startX) / viewport.scale;
-    const moveDy = (e.clientY - dragState.startY) / viewport.scale;
+    const drag = dragState.dragSession?.move({x:e.clientX, y:e.clientY}, {scale:viewport.scale});
+    const sharedPositions = drag ? new Map(drag.positions.map(item => [item.id, item])) : null;
+    const moveDx = drag ? drag.dx : (e.clientX - dragState.startX) / viewport.scale;
+    const moveDy = drag ? drag.dy : (e.clientY - dragState.startY) / viewport.scale;
     (dragState.group || [{id:dragState.id, ox:dragState.ox, oy:dragState.oy}]).forEach(item => {
         const n = nodes.find(x => x.id === item.id);
         if(!n) return;
-        n.x = item.ox + moveDx;
-        n.y = item.oy + moveDy;
+        const pos = sharedPositions?.get(item.id) || {x:item.ox + moveDx, y:item.oy + moveDy};
+        n.x = pos.x;
+        n.y = pos.y;
     });
     if(assetLibraryOpen){
         const hit = document.elementFromPoint(e.clientX, e.clientY);

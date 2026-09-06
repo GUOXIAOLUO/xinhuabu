@@ -1154,6 +1154,49 @@ console.log(JSON.stringify({{classic, smart, classicZoom, smartZoom, minimapView
         self.assertIn("let restoredViewport = {x:prev.x, y:prev.y, scale:prev.scale};", smart)
         self.assertIn("const targetViewport = (smartUnifiedRuntimeEnabled", smart)
 
+    def test_shared_node_drag_session_projects_member_positions(self):
+        runtime = ROOT / "static" / "js" / "workbench" / "canvas" / "runtime-state.js"
+        script = f"""
+const fs = require('fs'); const vm = require('vm');
+const sandbox = {{window: {{}}}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(runtime))}, 'utf8'), sandbox);
+const shared = sandbox.window.WorkbenchCanvasRuntime;
+const session = shared.createNodeDragSession({{
+  start:{{x:10, y:20}}, scale:2,
+  members:[{{id:'a', ox:100, oy:50}}, {{id:'b', ox:0, oy:0}}, null, {{ox:1, oy:1}}],
+}});
+const moved = session.move({{x:30, y:60}});
+const rescaled = session.move({{x:30, y:60}}, {{scale:1}});
+const fallbackSession = shared.createNodeDragSession({{start:{{x:0, y:0}}, members:[{{id:'m', ox:5, oy:6}}]}});
+const fallbackMoved = fallbackSession.move({{x:4, y:8}});
+console.log(JSON.stringify({{
+  members: session.members.map(member => ({{id:member.id, ox:member.ox, oy:member.oy}})),
+  moved,
+  rescaled,
+  fallbackMoved,
+  frozen: Object.isFrozen(session) && Object.isFrozen(moved) && Object.isFrozen(moved.positions) && Object.isFrozen(moved.positions[0]),
+}}));
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        self.assertEqual(json.loads(result.stdout), {
+            "members": [{"id": "a", "ox": 100, "oy": 50}, {"id": "b", "ox": 0, "oy": 0}],
+            "moved": {"dx": 10, "dy": 20, "positions": [{"id": "a", "x": 110, "y": 70}, {"id": "b", "x": 10, "y": 20}]},
+            "rescaled": {"dx": 20, "dy": 40, "positions": [{"id": "a", "x": 120, "y": 90}, {"id": "b", "x": 20, "y": 40}]},
+            "fallbackMoved": {"dx": 4, "dy": 8, "positions": [{"id": "m", "x": 9, "y": 14}]},
+            "frozen": True,
+        })
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        self.assertIn("window.WorkbenchCanvasRuntime?.createNodeDragSession?.({", classic)
+        self.assertIn("isLocalCopy:Boolean(e.altKey), dragSession};", classic)
+        self.assertIn("const dragPosition = (id, ox, oy) => sharedPositions?.get(id) || {x:ox + dx, y:oy + dy};", classic)
+        self.assertIn("(e.clientX - dragNode.sx) / viewport.scale", classic)
+        self.assertIn("window.WorkbenchCanvasRuntime?.createNodeDragSession?.({", smart)
+        self.assertIn("const dragSession = smartUnifiedRuntimeEnabled", smart)
+        self.assertIn("dragSession:detachSession", smart)
+        self.assertIn("const pos = sharedPositions?.get(item.id) || {x:item.ox + moveDx, y:item.oy + moveDy};", smart)
+        self.assertIn("(e.clientX - dragState.startX) / viewport.scale", smart)
+
     def test_node_creation_client_projects_service_results_without_page_specific_shapes(self):
         client = ROOT / "static" / "js" / "workbench" / "canvas" / "node-creation-client.js"
         script = f"""
@@ -1629,7 +1672,7 @@ console.log(JSON.stringify({{
         self.assertIn("command-registry.js?v=2026.09.06.6", page)
         self.assertIn("creation-catalog.js?v=2026.09.04.1", page)
         self.assertIn("generation-intent.js?v=2026.09.04.1", page)
-        self.assertIn("smart-canvas.js?v=2026.09.06.10", page)
+        self.assertIn("smart-canvas.js?v=2026.09.06.11", page)
 
     def test_smart_node_inspector_sections_are_ephemeral_and_collapsible(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
@@ -2325,7 +2368,7 @@ console.log(JSON.stringify({{shellApplied, fullVisible, statusHiddenInFull, cont
         self.assertIn("function admits(policy, node)", admission)
         self.assertIn("renderer-admission.js?v=2026.09.06.1", page)
         self.assertIn(".image-node.legacy-renderer-mounted > .floating-node-actions", styles)
-        self.assertIn("smart-canvas.js?v=2026.09.06.10", page)
+        self.assertIn("smart-canvas.js?v=2026.09.06.11", page)
 
     def test_classic_output_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
@@ -2624,7 +2667,7 @@ console.log(JSON.stringify({{shellApplied, fullVisible, statusHiddenInFull, cont
         self.assertIn("command-registry.js?v=2026.09.06.6", page)
         self.assertIn("creation-catalog.js?v=2026.09.04.1", page)
         self.assertIn("generation-intent.js?v=2026.09.04.1", page)
-        self.assertIn("canvas.js?v=2026.09.06.12", page)
+        self.assertIn("canvas.js?v=2026.09.06.13", page)
         self.assertIn("WorkbenchUnifiedRenderHost.cardShellView({selected:selected.has(node.id), onIntent:handleCanvasNodeShellIntent})", classic)
         self.assertIn("const canvasNodeShellIntentAdapter = window.WorkbenchUnifiedRenderHost.createIntentAdapter({", classic)
         self.assertIn("delete:intent => deleteNodeFromButton(intent.nodeId)", classic)
