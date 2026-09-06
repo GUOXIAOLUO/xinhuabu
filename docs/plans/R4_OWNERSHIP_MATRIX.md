@@ -328,6 +328,20 @@ client, and both adapters consume that shared contract; the divergent parts are 
 themselves, which stay adapter-owned by design. Remaining seam work is unit (4) only (shared
 remote-apply scheduling: Classic's `remoteSyncTimer` deferral and Smart's `canvasSyncTimer` merge
 deferral), which is deferred until its owning batch.
+
+Migration unit (4) complete (2026-09-06): shared deferred remote-apply scheduling now has one owner —
+`WorkbenchCanvasSaveScheduler.createRemoteApply` — replacing both pages' raw deferral timer state.
+Classic's `remoteSyncTimer` is removed; its two scheduling sites keep their exact delays (1000 ms
+dirty/saving deferral in `applyRemoteCanvasData`; 700/120 ms WS-update path) through `remoteApplyTimer`.
+Smart's `canvasSyncTimer` and the `scheduleCanvasMergeReload` wrapper are removed; its two scheduling
+sites keep their exact delays (600 ms drag/selection self-deferral; 200 ms WS-update path) through
+`mergeReloadTimer`, while the poll path still applies directly without a timer. Sandbox tests pin the
+shared single-slot replace semantics (clear-then-set), default/fallback delay, cancel, and per-adapter
+scheduling-site counts; JS syntax and the full regression (286 tests) pass. With this unit the
+characterized seam migration order is complete (revision mirror → schedule/coalesce → 409-detection
+assessment → remote-apply scheduling), so the polling interval/eligibility ownership row is no longer
+blocked on this seam. Both adapters' apply actions, deferral conditions, and conflict policies remain
+adapter-owned by design.
 ```
 
 ## Browser — new Canvas
