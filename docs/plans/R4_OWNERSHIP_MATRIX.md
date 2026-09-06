@@ -406,6 +406,7 @@ Not yet run in this task. Existing status records read-only acceptance only.
 2026-09-06 read-only local post-empty-Output-mutation smoke: the same Classic fixture rendered its six ready cards and `100% · 完整 · 6 节点` after loading the new mutation script version. No Output move/delete, Canvas mutation, creation or execution was invoked.
 
 2026-09-06 read-only local post-empty-Group-mutation smoke: the same Classic fixture rendered its six ready cards and `100% · 完整 · 6 节点` after loading the new mutation script version. No Group move/delete, Canvas mutation, creation or execution was invoked.
+2026-09-06 isolated read/write smoke `127.0.0.1:3014` (process-local copy of the local SQLite database, canonical default routing): the Classic fixture `7ed83bf56f234d77a9e67ae1f6496577` rendered six NodeShell-mounted cards and `100% · 完整 · 6 节点` with `WorkbenchSemanticZoomApply`, `createNodeDragSession` and `createNodeResizeSession` present and `unified_canvas` default-on. A pointer drag of the `video-item` card moved it from (1018,237) to (1098,297) — exactly the +80/+60 screen delta through the shared drag session — and a resize-handle drag grew it from 252×376 to 301×414, exactly the +49/+38 proposal; the isolated database recorded the dragged position and resized box. No console errors surfaced; the temporary server and database copy were stopped and removed after the check.
 ```
 
 ## Browser — Legacy Smart
@@ -432,6 +433,7 @@ Not yet run in this task. Existing status records read-only acceptance only.
 2026-09-06 Smart blank-Prompt mutation browser read smoke: local `127.0.0.1:3000` loaded historical Smart fixture `ca914662f0dc4923bd5b60b29eb55b68` after the cache-version update, retaining its Composer and `65% · 摘要 · 2 节点`. The check was read-only: no Prompt move/delete, save, creation or execution was invoked.
 
 2026-09-06 Classic connected-creation browser read smoke: local `127.0.0.1:3000` loaded Classic fixture `7ed83bf56f234d77a9e67ae1f6496577` after the command cache update, retaining six ready cards, generic Input/Output ports, media controls, workflow controls, and `100% · 完整 · 6 节点`. The check was read-only: no connection, creation, save, deletion or execution was invoked.
+2026-09-06 isolated read/write smoke on the same `127.0.0.1:3014` temporary server: the historical Smart fixture `ca914662f0dc4923bd5b60b29eb55b68` rendered its Composer, shell-mounted Group and Prompt cards, the retained empty node, and `65% · 摘要 · 2 节点`, with the shared semantic-zoom, drag and resize modules present and `unified_canvas` default-on. A pointer drag of the Prompt card at 65% zoom moved it by a world delta of +61.84/+46.38 — exactly the +40/+30 screen path divided by the live scale through the shared drag session — and the isolated database recorded the new position. No console errors surfaced; the temporary server was stopped and removed after the check.
 ```
 
 ## Persistence / restart
