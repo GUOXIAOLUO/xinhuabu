@@ -311,6 +311,23 @@ deferred forever in a 1-second reload loop; the scheduler's real `hasScheduled()
 tests cover debounce, coalesced retry (with `onRetry`), overlap mode, cancel, and the observers; source
 assertions pin script order and the removal of all legacy state variables. Full regression: PASS (285
 tests). Remaining in this seam: unit (3) shared 409 detection, unit (4) shared remote-apply scheduling.
+
+Browser write smoke for units 1–2 (read-isolated, `127.0.0.1:3013`, process-local temporary data
+directory, 2026-09-06): the Classic editor booted with all edited wiring (NodeShell-ready page,
+`100% · 完整 · 0 节点`), a context-menu 上传节点 creation went through the versioned NodeCreationService
+route, the page's revision mirror adopted the server revision (`lastCanvasUpdatedAt` ==
+persisted `updated_at` == 1788661517529), the created `image` node with its idempotency request id was
+found in the isolated canvas payload after reload (`100% · 完整 · 1 节点`, NodeShell-ready Image card),
+and no runtime wiring errors surfaced. The in-editor back-navigation was not directly exercised in the
+browser; its changed lines (`saveScheduler.cancel` / flush wrapper) are covered by the sandbox
+behavioral tests.
+
+Unit (3) assessment (2026-09-06): no migration remains — the 409 transport normalization (response
+`canvas`/`updatedAt` extraction from the conflict body) is already owned by the shared persistence
+client, and both adapters consume that shared contract; the divergent parts are the conflict policies
+themselves, which stay adapter-owned by design. Remaining seam work is unit (4) only (shared
+remote-apply scheduling: Classic's `remoteSyncTimer` deferral and Smart's `canvasSyncTimer` merge
+deferral), which is deferred until its owning batch.
 ```
 
 ## Browser — new Canvas

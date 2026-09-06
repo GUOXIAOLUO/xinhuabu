@@ -169,6 +169,17 @@ Classic's remote-apply deferral read a stale `saveTimer` handle, causing an
 endless 1-second remote reload loop after any local save; the scheduler's real
 pending state replaces it. Sandbox behavioral tests plus source-contract
 assertions pass; the full regression passes at 285 tests.
+
+Browser write smoke for save-coordinator units 1–2 (read-isolated
+`127.0.0.1:3013` with a process-local temporary data directory, 2026-09-06):
+PASS — the Classic editor booted with the edited wiring, a context-menu blank
+Image creation went through the versioned NodeCreationService route, the page's
+revision mirror adopted the persisted server revision (1788661517529), the node
+survived reload (`100% · 完整 · 1 节点`) with the idempotency request id present
+in the isolated canvas payload, and no runtime wiring errors surfaced. Unit 3
+(shared 409 detection) is assessed as already owned by the shared persistence
+client transport; only unit 4 (shared remote-apply scheduling) remains in this
+seam and is deferred to its owning batch.
 Editable-target detection for keyboard/drag guards now shares its base DOM
 semantics; Smart supplies its retained prompt-control selector while Classic keeps
 its existing narrower selector behavior.
