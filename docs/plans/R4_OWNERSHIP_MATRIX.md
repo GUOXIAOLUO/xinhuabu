@@ -468,19 +468,35 @@ temporary server and database copy were stopped and removed after the check.
 ## Persistence / restart
 
 ```text
-SQLite authority/CAS evidence is recorded in CURRENT_EXECUTION_STATUS.md; no new persistence mutation or restart was run in this pass.
+2026-09-06 isolated restart durability check `127.0.0.1:3019` (process-local copy of the local SQLite
+database): after the dual-writer conflict cycle below reached revision R2 (1788679108411) with the moved
+`video-item` node at (1078,277), the server process was killed and restarted on the same database copy;
+a fresh API read returned the identical revision and node position. The temporary server was stopped and
+the database copy removed after the check.
 ```
 
 ## Stale conflict
 
 ```text
-No new stale-write run in this inventory pass.
+2026-09-06 isolated dual-writer conflict run `127.0.0.1:3019` (process-local SQLite copy, canonical
+default routing), Classic fixture `7ed83bf56f234d77a9e67ae1f6496577`: (1) API level — a PUT with the
+current base revision succeeded (200, R0→R1) and an immediate second PUT carrying the stale base R0 was
+rejected with 409 and a conflict detail containing the authoritative canvas and updated_at; (2) browser
+level — the loaded page (whose remote-read poll had already adopted R1) was deterministically set one
+revision behind, a real pointer drag of `video-item` by exactly (+60,+40) scheduled a save with the
+stale base, fetch instrumentation recorded the 409 followed 9 ms later by a successful retry (200), the
+adapter adopted the authoritative revision (R2, 1788679108411) and the moved node position was confirmed
+through a fresh API read. No console errors; the temporary server was stopped after the check.
 ```
 
 ## Rollback
 
 ```text
-No new rollback run in this inventory pass.
+2026-09-06 isolated rollback-path check on the same temporary server: the Classic editor loaded with
+`unified_canvas=0` (the bounded U7 rollback control) with the unified runtime confirmed null, rendered
+its six NodeShell cards and `100% · 完整 · 6 节点` indicator, and a real pointer drag of `video-item`
+moved it by exactly (+50,+35) through the page-local fallback math with a clean save. The temporary
+server and database copy were stopped and removed after the check.
 ```
 
 ## Workflow import/export
