@@ -6,9 +6,15 @@ from threading import Lock
 
 from workbench.application.legacy_definitions import LegacyDefinitionRegistry
 from workbench.application.node_creation import NodeCreationService
-from workbench.application.node_mutation import NodeDeleteCommand, NodeMutationService, NodeUpdateCommand
+from workbench.application.node_mutation import (
+    NodeDeleteCommand,
+    NodeMutationService,
+    NodeMutationUnsupportedError,
+    NodeUpdateCommand,
+)
 from workbench.domain.canvas.models import ModelBinding, Position
 from workbench.repositories.jsonl_audit_sink import JsonlAuditSink
+from workbench.repositories.canvas_repository import StaleCanvasRevisionError
 from workbench.repositories.legacy_json_canvas_repository import LegacyJsonCanvasRepository
 from workbench.repositories.legacy_json_node_repository import (
     LegacyCanvasProjectAuthorizer,
@@ -331,3 +337,70 @@ class LegacyNodeAdaptersTests(unittest.TestCase):
         self.assertEqual((self.canvas_repository.load("canvas-1")["nodes"][0]["type"], self.canvas_repository.load("canvas-1")["nodes"][0]["x"]), ("smart-loop", 44))
         self.mutations.delete(NodeDeleteCommand(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="smart-loop-1", expected_revision=updated.canvas_revision))
         self.assertEqual(self.canvas_repository.load("canvas-1")["nodes"], [])
+
+    def seed_node(self, node):
+        before = self.canvas_repository.load("canvas-1")
+        def append(canvas):
+            canvas["nodes"] = [*(canvas.get("nodes") or []), node]
+        self.canvas_repository.mutate_if_current("canvas-1", expected_updated_at=before["updated_at"], mutation=append)
+        return self.canvas_repository.load("canvas-1")["updated_at"]
+
+    def test_update_and_delete_content_bearing_image_is_rejected(self):
+        revision = self.seed_node({"id": "rich-image", "type": "image", "name": "导入图片", "url": "/output/a.png", "x": 20, "y": 30})
+        with self.assertRaises(NodeMutationUnsupportedError):
+            self.mutations.update(NodeUpdateCommand(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="rich-image", expected_revision=revision, position=Position(x=44, y=55)))
+        with self.assertRaises(NodeMutationUnsupportedError):
+            self.mutations.delete(NodeDeleteCommand(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="rich-image", expected_revision=revision))
+        canvas = self.canvas_repository.load("canvas-1")
+        self.assertEqual(canvas["updated_at"], revision)
+        self.assertEqual([node["id"] for node in canvas["nodes"]], ["rich-image"])
+
+    def test_group_member_blank_image_is_rejected(self):
+        revision = self.seed_node({"id": "member-image", "type": "image", "name": "Image", "x": 20, "y": 30})
+        before = self.canvas_repository.load("canvas-1")
+        self.canvas_repository.mutate_if_current("canvas-1", expected_updated_at=before["updated_at"], mutation=lambda canvas: canvas["nodes"].append({"id": "group-1", "type": "group", "title": "Group", "items": ["member-image"], "x": 0, "y": 0}))
+        revision = self.canvas_repository.load("canvas-1")["updated_at"]
+        with self.assertRaises(NodeMutationUnsupportedError):
+            self.mutations.update(NodeUpdateCommand(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="member-image", expected_revision=revision, position=Position(x=44, y=55)))
+        with self.assertRaises(NodeMutationUnsupportedError):
+            self.mutations.delete(NodeDeleteCommand(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="member-image", expected_revision=revision))
+        canvas = self.canvas_repository.load("canvas-1")
+        self.assertEqual(canvas["updated_at"], revision)
+        self.assertEqual({node["id"] for node in canvas["nodes"]}, {"member-image", "group-1"})
+        self.assertEqual(next(node for node in canvas["nodes"] if node["id"] == "group-1")["items"], ["member-image"])
+
+    def test_input_referenced_node_delete_is_rejected(self):
+        revision = self.seed_node({"id": "referenced-image", "type": "image", "name": "Image", "x": 20, "y": 30})
+        before = self.canvas_repository.load("canvas-1")
+        self.canvas_repository.mutate_if_current("canvas-1", expected_updated_at=before["updated_at"], mutation=lambda canvas: canvas["nodes"].append({"id": "consumer", "type": "loop", "count": 3, "inputNodeIds": ["referenced-image"], "x": 60, "y": 60}))
+        revision = self.canvas_repository.load("canvas-1")["updated_at"]
+        with self.assertRaises(NodeMutationUnsupportedError):
+            self.mutations.delete(NodeDeleteCommand(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="referenced-image", expected_revision=revision))
+        canvas = self.canvas_repository.load("canvas-1")
+        self.assertEqual(canvas["updated_at"], revision)
+        self.assertEqual(canvas["nodes"][1]["inputNodeIds"], ["referenced-image"])
+
+    def test_connected_prompt_is_rejected_while_connected_image_removes_its_edges(self):
+        revision = self.seed_node({"id": "linked-prompt", "type": "prompt", "text": "", "x": 20, "y": 30})
+        before = self.canvas_repository.load("canvas-1")
+        self.canvas_repository.mutate_if_current("canvas-1", expected_updated_at=before["updated_at"], mutation=lambda canvas: canvas.update({"connections": [{"id": "edge-1", "from": "linked-prompt", "to": "target", "kind": "input"}]}))
+        revision = self.canvas_repository.load("canvas-1")["updated_at"]
+        with self.assertRaises(NodeMutationUnsupportedError):
+            self.mutations.delete(NodeDeleteCommand(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="linked-prompt", expected_revision=revision))
+        self.assertEqual(len(self.canvas_repository.load("canvas-1")["nodes"]), 1)
+
+        revision = self.seed_node({"id": "linked-image", "type": "image", "name": "Image", "x": 80, "y": 80})
+        deleted = self.mutations.delete(NodeDeleteCommand(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="linked-image", expected_revision=revision))
+        canvas = self.canvas_repository.load("canvas-1")
+        self.assertEqual([node["id"] for node in canvas["nodes"]], ["linked-prompt"])
+        self.assertEqual([edge["id"] for edge in canvas["connections"] if edge.get("from") == "linked-image" or edge.get("to") == "linked-image"], [])
+        self.assertGreater(deleted.canvas_revision, revision)
+
+    def test_stale_mutation_is_rejected_without_canvas_change(self):
+        revision = self.seed_node({"id": "blank-image", "type": "image", "name": "Image", "x": 20, "y": 30})
+        with self.assertRaises(StaleCanvasRevisionError):
+            self.mutations.update(NodeUpdateCommand(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="blank-image", expected_revision=revision - 1, position=Position(x=44, y=55)))
+        with self.assertRaises(StaleCanvasRevisionError):
+            self.mutations.delete(NodeDeleteCommand(actor_id="user-1", project_id="project-1", canvas_id="canvas-1", node_id="blank-image", expected_revision=revision - 1))
+        canvas = self.canvas_repository.load("canvas-1")
+        self.assertEqual((canvas["updated_at"], canvas["nodes"][0]["x"]), (revision, 20))

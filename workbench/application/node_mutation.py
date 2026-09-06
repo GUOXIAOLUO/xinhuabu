@@ -14,6 +14,13 @@ class NodeMutationError(ValueError):
         super().__init__(message)
 
 
+class NodeMutationUnsupportedError(NodeMutationError):
+    """The node exists but its shape is not yet proven safe for versioned mutation."""
+
+    def __init__(self, message: str):
+        super().__init__("unsupported_node_shape", message)
+
+
 @dataclass(frozen=True)
 class NodeUpdateCommand:
     actor_id: str

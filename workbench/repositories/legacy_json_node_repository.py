@@ -4,7 +4,12 @@ from typing import Any
 
 from workbench.application.node_creation import NodeCreationPersistence
 from workbench.application.graph_mutation import CreateNodeAndEdgeCommand, GraphMutationPersistence
-from workbench.application.node_mutation import NodeDeleteCommand, NodeMutationPersistence, NodeUpdateCommand
+from workbench.application.node_mutation import (
+    NodeDeleteCommand,
+    NodeMutationPersistence,
+    NodeMutationUnsupportedError,
+    NodeUpdateCommand,
+)
 from workbench.domain.canvas.legacy_adapter import LegacyCanvasAdapter
 from workbench.domain.canvas.models import NodeRecord
 
@@ -129,7 +134,18 @@ class LegacyJsonNodeLookup:
 
 
 class LegacyJsonNodeMutationRepository:
-    """Update or delete transitional Image and safe Classic/Smart simple node shapes."""
+    """Update or delete only the characterized standalone blank node shapes.
+
+    The adapters route their narrow blank-node contracts through the versioned
+    service, but this backend boundary must not trust that frontend gate: any
+    rich, grouped, history-linked, input-referenced, or connected (beyond the
+    characterized Image edge cleanup) node is rejected here under the same
+    canvas lock that performs the mutation.
+    """
+
+    # Image deletion is the one characterized contract that removes connected
+    # edges instead of requiring a link-free node.
+    LINK_TOLERANT_NODE_TYPES = {"image", "smart-image"}
 
     def __init__(self, repository: LegacyJsonCanvasRepository):
         self._repository = repository
@@ -140,6 +156,7 @@ class LegacyJsonNodeMutationRepository:
         def mutation(canvas: dict[str, Any]) -> None:
             nonlocal updated
             updated = self._find_mutable_node(canvas, command.node_id)
+            _reject_unsupported_node_mutation(canvas, updated, link_tolerant=self.LINK_TOLERANT_NODE_TYPES)
             if command.title is not None:
                 if updated.get("type") == "smart-image":
                     updated["title"] = command.title
@@ -161,7 +178,8 @@ class LegacyJsonNodeMutationRepository:
 
     def delete_node(self, command: NodeDeleteCommand) -> NodeMutationPersistence:
         def mutation(canvas: dict[str, Any]) -> None:
-            self._find_mutable_node(canvas, command.node_id)
+            node = self._find_mutable_node(canvas, command.node_id)
+            _reject_unsupported_node_mutation(canvas, node, link_tolerant=self.LINK_TOLERANT_NODE_TYPES)
             canvas["nodes"] = [
                 node for node in canvas.get("nodes") or []
                 if not isinstance(node, dict) or node.get("id") != command.node_id
@@ -183,6 +201,112 @@ class LegacyJsonNodeMutationRepository:
         if node is None or node.get("type") not in {"image", "smart-image", "prompt", "loop", "output", "group", "smart-group", "smart-loop", "smart-prompt"}:
             raise LookupError("node not found")
         return node
+
+
+_CLASSIC_LOOP_DEFAULT_FIELDS = {"count": 3, "loopStart": 1, "imageBatchSize": 1, "videoBatchSize": 1}
+_SMART_IMAGE_BUSY_FLAGS = ("pending", "queued", "jimengPending", "running")
+
+
+def _node_is_group_member(canvas: dict[str, Any], node_id: str) -> bool:
+    return any(
+        isinstance(candidate, dict) and candidate.get("id") != node_id
+        and isinstance(candidate.get("items"), list) and node_id in candidate["items"]
+        for candidate in canvas.get("nodes") or []
+    )
+
+
+def _node_has_dependent_input_reference(canvas: dict[str, Any], node_id: str) -> bool:
+    return any(
+        isinstance(candidate, dict) and candidate.get("id") != node_id
+        and isinstance(candidate.get("inputNodeIds"), list) and node_id in candidate["inputNodeIds"]
+        for candidate in canvas.get("nodes") or []
+    )
+
+
+def _node_has_history_group(canvas: dict[str, Any], node_id: str) -> bool:
+    return any(
+        isinstance(candidate, dict) and str(candidate.get("historyFor") or "") == node_id
+        for candidate in canvas.get("nodes") or []
+    )
+
+
+def _node_is_linked(canvas: dict[str, Any], node_id: str) -> bool:
+    return any(
+        isinstance(edge, dict) and (edge.get("from") == node_id or edge.get("to") == node_id)
+        for edge in canvas.get("connections") or []
+    )
+
+
+def _node_has_content(node: dict[str, Any]) -> bool:
+    """True when the durable node payload exceeds its characterized blank shape."""
+    node_type = node.get("type")
+    if node_type == "image":
+        return bool(str(node.get("url") or "").strip())
+    if node_type == "smart-image":
+        return bool(node.get("images")) or bool(str(node.get("url") or "").strip()) or any(
+            bool(node.get(flag)) for flag in _SMART_IMAGE_BUSY_FLAGS
+        )
+    if node_type == "prompt":
+        return bool(str(node.get("text") or "").strip())
+    if node_type == "smart-prompt":
+        return (
+            bool(str(node.get("text") or "").strip())
+            or bool(str(node.get("promptResult") or "").strip())
+            or bool(node.get("promptResultOutdated"))
+            or bool(node.get("llmEnabled"))
+            or bool(node.get("llmSystemEnabled"))
+            or bool(str(node.get("llmInstruction") or "").strip())
+            or bool(node.get("promptAttachments"))
+        )
+    if node_type == "loop":
+        if node.get("mode") not in (None, "serial"):
+            return True
+        if any(bool(node.get(flag)) for flag in ("showPrompt", "imageInput", "videoInput")):
+            return True
+        if any(not _field_is_default(node, key, default) for key, default in _CLASSIC_LOOP_DEFAULT_FIELDS.items()):
+            return True
+        return bool(str(node.get("variablePrompt") or "").strip()) or bool(str(node.get("fixedPrompt") or "").strip())
+    if node_type == "smart-loop":
+        if node.get("mode") not in (None, "serial"):
+            return True
+        if any(bool(node.get(flag)) for flag in ("showPrompt", "imageInput")):
+            return True
+        if not all(_field_is_default(node, key, 1) for key in ("count", "loopStart", "imageBatchSize")):
+            return True
+        if bool(str(node.get("variablePrompt") or "").strip()) or any(
+            str(value or "").strip() for value in node.get("variablePrompts") or []
+        ):
+            return True
+        return bool(node.get("inputNodeIds"))
+    if node_type in ("group", "smart-group"):
+        return bool(node.get("items")) or bool(node.get("images")) or bool(node.get("inputNodeIds"))
+    if node_type == "output":
+        return bool(node.get("images")) or bool(node.get("_pending")) or bool(node.get("imageComparisons"))
+    return True
+
+
+def _field_is_default(node: dict[str, Any], key: str, default: int) -> bool:
+    """Treat a missing field as its blank default and unparseable values as content."""
+    value = node.get(key)
+    if value is None or value == "":
+        return True
+    try:
+        return int(value) == default
+    except (TypeError, ValueError):
+        return False
+
+
+def _reject_unsupported_node_mutation(canvas: dict[str, Any], node: dict[str, Any], *, link_tolerant: set[str]) -> None:
+    """Enforce the conservative backend boundary for versioned node mutation."""
+    node_id = str(node.get("id") or "")
+    if _node_is_group_member(canvas, node_id):
+        raise NodeMutationUnsupportedError("group members are not versioned-mutable")
+    if _node_has_history_group(canvas, node_id) or _node_has_dependent_input_reference(canvas, node_id):
+        raise NodeMutationUnsupportedError("history-linked or input-referenced nodes are not versioned-mutable")
+    if _node_has_content(node):
+        raise NodeMutationUnsupportedError("content-bearing nodes are not versioned-mutable")
+    if node.get("type") not in link_tolerant and _node_is_linked(canvas, node_id):
+        raise NodeMutationUnsupportedError("connected nodes are not versioned-mutable")
 
 
 class LegacyJsonGraphMutationRepository:

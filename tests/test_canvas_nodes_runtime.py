@@ -290,3 +290,32 @@ class CanvasNodesRuntimeTests(unittest.TestCase):
         self.assertTrue(response.created)
         self.assertEqual(saved["nodes"][0]["type"], "smart-minimax")
         self.assertFalse(saved["nodes"][0]["running"])
+
+    def test_registered_routes_reject_content_bearing_node_with_unsupported_shape(self):
+        canvas = main.new_canvas("unsupported shape API test", kind="classic", project="default")
+        create = self.endpoint("/api/v1/canvases/{canvas_id}/nodes", "POST")
+        created = asyncio.run(create(canvas["id"], NodeCreatePayload(
+            request_id="runtime-unsupported-1", project_id="default", source="legacy",
+            definition_ref={"type": "legacy", "id": "image", "version": "0"}, position={"x": 12, "y": 24},
+            expected_revision=canvas["updated_at"],
+        ), x_user_id="local-user"))
+        revision = main.load_canvas(canvas["id"])["updated_at"]
+        main.canvas_repository().mutate_if_current(canvas["id"], expected_updated_at=revision, mutation=lambda item: item["nodes"][0].update({"url": "/output/generated.png"}))
+        revision = main.load_canvas(canvas["id"])["updated_at"]
+        update = self.endpoint("/api/v1/canvases/{canvas_id}/nodes/{node_id}", "PUT")
+        with self.assertRaises(main.HTTPException) as raised:
+            asyncio.run(update(canvas["id"], created.node["id"], NodeUpdatePayload(
+                project_id="default", expected_revision=revision, position={"x": 44, "y": 55},
+            ), x_user_id="local-user"))
+        self.assertEqual(raised.exception.status_code, 422)
+        self.assertEqual(raised.exception.detail["code"], "unsupported_node_shape")
+        delete = self.endpoint("/api/v1/canvases/{canvas_id}/nodes/{node_id}", "DELETE")
+        with self.assertRaises(main.HTTPException) as raised:
+            asyncio.run(delete(canvas["id"], created.node["id"], NodeDeletePayload(
+                project_id="default", expected_revision=revision,
+            ), x_user_id="local-user"))
+        self.assertEqual(raised.exception.status_code, 422)
+        self.assertEqual(raised.exception.detail["code"], "unsupported_node_shape")
+        saved = main.load_canvas(canvas["id"])
+        self.assertEqual(saved["updated_at"], revision)
+        self.assertEqual(saved["nodes"][0]["url"], "/output/generated.png")
