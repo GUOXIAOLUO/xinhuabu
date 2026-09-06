@@ -6902,6 +6902,15 @@ function pasteNodes(){
     });
     const {nodes:copies, connections:newConnections, idMap} = materialized;
     copies.forEach(copy => {
+        if(Array.isArray(copy.items)){
+            // Pasted groups must reference pasted member copies when the members
+            // were part of the copied selection; refs to pre-existing nodes stay,
+            // dangling refs are dropped. The check runs against both the copies
+            // (not yet pushed into `nodes`) and the existing canvas nodes.
+            copy.items = copy.items
+                .map(id => idMap.get(id) || id)
+                .filter(id => nodes.some(n => n.id === id) || copies.some(c => c.id === id));
+        }
         if(Array.isArray(copy.inputNodeIds)){
             copy.inputNodeIds = copy.inputNodeIds.map(id => idMap.get(id)).filter(Boolean);
         }

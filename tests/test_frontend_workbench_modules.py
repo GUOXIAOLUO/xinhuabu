@@ -1722,7 +1722,7 @@ console.log(JSON.stringify({{
         self.assertIn("command-registry.js?v=2026.09.06.6", page)
         self.assertIn("creation-catalog.js?v=2026.09.04.1", page)
         self.assertIn("generation-intent.js?v=2026.09.04.1", page)
-        self.assertIn("smart-canvas.js?v=2026.09.06.13", page)
+        self.assertIn("smart-canvas.js?v=2026.09.06.15", page)
 
     def test_smart_node_inspector_sections_are_ephemeral_and_collapsible(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
@@ -2418,7 +2418,7 @@ console.log(JSON.stringify({{shellApplied, fullVisible, statusHiddenInFull, cont
         self.assertIn("function admits(policy, node)", admission)
         self.assertIn("renderer-admission.js?v=2026.09.06.1", page)
         self.assertIn(".image-node.legacy-renderer-mounted > .floating-node-actions", styles)
-        self.assertIn("smart-canvas.js?v=2026.09.06.13", page)
+        self.assertIn("smart-canvas.js?v=2026.09.06.15", page)
 
     def test_classic_output_node_can_use_the_opt_in_shared_legacy_renderer(self):
         classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
