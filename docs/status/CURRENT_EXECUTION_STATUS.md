@@ -5,11 +5,11 @@ status_schema: workbench.execution-status/2
 ## Repository
 
 repository: local worktree (remote repository out of scope)
-verified_head: 23f7895ae55bde9f76f3c1e6d4ac0f2e913531bd
-verified_commit: "docs: refine migration architecture plan"
+verified_head: a6a44502504f33fd2acd8eb4210a8e83d698f601
+verified_commit: "feat: enforce backend node mutation shape boundary"
 branch: main
 remote_state: not checked; GitHub/remote synchronization is out of scope for this local task
-verified_at: 2026-09-05T08:18:02+08:00
+verified_at: 2026-09-06T09:25:00+08:00
 verification_source: current local worktree
 worktree_before_R0: clean
 worktree_after_R4_partial: dirty_only_by_R0_R1_R2_R3_and_R4_changes
@@ -92,6 +92,33 @@ decisions remain adapter-owned.
 The API image-size calculation now likewise shares only its pure, injected
 algorithm; each adapter retains its own ratio parser, size map, model choice, and
 provider/execution behavior.
+
+R4 backend mutation safety boundary (2026-09-06): the Legacy mutation repository
+no longer trusts the frontend blank-node eligibility gate. Inside the same canvas
+lock that performs the mutation it now rejects content-bearing, grouped,
+history-linked, input-referenced, and (except the characterized Image edge
+cleanup) connected nodes for both update and delete with
+`unsupported_node_shape` (HTTP 422); stale revisions still return 409 and the
+supported standalone blank shapes keep their existing contracts. Adapter and
+route tests pin the rejection and mapping, and the full regression passes at 280
+tests.
+
+R4 canonical data-integrity repair (2026-09-06): a legacy-routed (rollback)
+server session that morning produced a verified split-brain — one orphan Canvas
+existed only in Legacy JSON, sixteen active Canvases carried list-board position
+drift, and the SQLite `canvases` table contained a `revision`/`baseline` row
+leaked by an older `test_repository_baseline` run before that test gained its
+routing patch. After a pre-repair snapshot
+(`data/canvas-source-backups/r4-repair-20260906T091748/`), refreshing the stale
+`7ed83bf5…` rollback file from its newer canonical payload, converging the orphan
+and board-only drifts through the tested migration import path, and purging the
+test-artifact row through `purge_canvas_payload` with audit, the post-repair
+report `data/r4-repair-migration-report.json` shows authority `sqlite`, 23
+imported, 0 skipped, 23 comparisons, 0 differences, SQLite rows equal to Legacy
+files with zero divergent payloads. Running a legacy-routed server
+(`WORKBENCH_CANONICAL_CANVAS_ROUTING_ENABLED=false`) while SQLite authority is
+active is now a known split-brain hazard and must not be used for normal product
+work.
 Editable-target detection for keyboard/drag guards now shares its base DOM
 semantics; Smart supplies its retained prompt-control selector while Classic keeps
 its existing narrower selector behavior.
@@ -282,10 +309,14 @@ handoff: not_implemented
   model compatibility. Current Legacy policy rejects supplied models. It supports a
   restricted Legacy definition set (including Classic Output) and durable request
   idempotency. Persistence and JSONL audit are separate.
-- NodeMutationService can update exactly `title` and `position`, or delete. Current
-  Legacy repository applies this only to Image nodes; delete removes connected
-  edges. Positive revision and `can_edit` are required. Persistence/audit are
-  separate.
+- NodeMutationService can update exactly `title` and `position`, or delete. The
+  Legacy mutation repository applies this only to the characterized standalone
+  blank shapes (Classic/Smart Image, Prompt, default Loop, empty Output, empty
+  Group) and now rejects content-bearing, grouped, history-linked,
+  input-referenced, and (except Image edge cleanup) connected nodes with
+  `unsupported_node_shape` instead of trusting the frontend gate. Delete removes
+  connected edges for the tolerated Image contracts. Positive revision and
+  `can_edit` are required. Persistence/audit are separate.
 - GraphMutationService supports only atomic create-node-plus-edge. It validates
   revision/Canvas/new-node edge reference/`can_edit`; edge ports are
   `legacy.out -> legacy.in`. The Legacy repository writes node and edge under one
@@ -348,7 +379,9 @@ Command:
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests -q
 ```
 
-Result: PASS after current R4 work — 240 tests in 2.409 seconds, Python 3.14.7.
+Result: PASS after current R4 work — 280 tests in 2.1 seconds, Python 3.14.7
+(2026-09-06, including the backend blank-shape mutation boundary and route
+rejection contract).
 
 R4 canonical-routing local acceptance:
 

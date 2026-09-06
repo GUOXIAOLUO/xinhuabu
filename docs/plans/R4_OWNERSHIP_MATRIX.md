@@ -51,7 +51,7 @@ REMOVE       = 可删除/待删除
 | creation catalog | menu adapter | menu adapter | command/catalog definitions | PARTIAL | Unified | Replace page constructors for normal creation. | `command-registry.js` |
 | node creation | fallback constructors for unsupported/historical and file-drop paths; shared top-level/connected result commits | fallback constructors for unsupported/historical and file-drop paths; shared top-level/connected result commits | NodeCreationService/GraphMutationService APIs plus shared node/graph result commits | PARTIAL | Unified | Migrate file-drop lifecycle and remaining adapter request projection; retain only bounded compatibility. | `node-creation-client.js`; default-on/Smart-shape/node-and-graph-result contracts |
 | node deletion | versioned mutation for standalone blank Image/Prompt/default Loop/empty Output/empty Group; compatibility for configured/content/connected/group-member/other nodes | versioned mutation for standalone blank Smart Image/Prompt/empty Smart Group/default Smart Loop; compatibility for media/group/history/dependent nodes | NodeMutationService/API | PARTIAL | Unified | Migrate remaining deletion contracts only after group/media parity is explicit. | Canvas-node route tests; Classic/Smart versioned-delete contracts |
-| node mutation | versioned position update for standalone blank Image/Prompt/default Loop/empty Output/empty Group; compatibility for configured/richer/group-member moves/edits | versioned position update for standalone blank Smart Image/Prompt/empty Smart Group/default Smart Loop; compatibility for richer moves/edits | NodeMutationService/API | PARTIAL | Unified | Migrate resize/group/media and other edit contracts only after parity is explicit. | Canvas-node route tests; Classic/Smart versioned-position contracts |
+| node mutation | versioned position update for standalone blank Image/Prompt/default Loop/empty Output/empty Group; compatibility for configured/richer/group-member moves/edits | versioned position update for standalone blank Smart Image/Prompt/empty Smart Group/default Smart Loop; compatibility for richer moves/edits | NodeMutationService/API with backend blank-shape enforcement | PARTIAL | Unified | Migrate resize/group/media and other edit contracts only after parity is explicit. | Canvas-node route tests; Classic/Smart versioned-position contracts; backend unsupported-shape rejection contract |
 | context-menu creation | fallback constructors for unsupported/group-member paths; shared top-level and connected result commits | fallback constructors for group-member paths; shared top-level and connected result commits | catalog/API plus shared node/graph result commit for migrated top-level and connected creation | PARTIAL | Unified | Centralize remaining page request projection; retain only bounded compatibility. | `node-creation-client.js`; node-and-graph-result contract |
 | file-drop creation | adapter media/layout/save; shared DataTransfer and upload transport | adapter media/layout/save; shared DataTransfer and upload transport | shared DataTransfer traversal/payload resolution/multipart upload; adapter-owned result materialization | PARTIAL | Unified | Migrate result materialization only after media/group parity is explicit. | `media-drop-payload.js`; payload-and-upload contract |
 | clipboard copy | adapter selection/UI | adapter selection/UI | graph fragment + clipboard helper | PARTIAL | Unified | Move selection/UI lifecycle. | `canvas-clipboard.js` |
@@ -200,6 +200,38 @@ PASS (76 tests). This characterizes shared-module seams only; it is not R4 Gate 
 2026-09-06 Smart standalone blank-Prompt mutation: the Legacy mutation repository now accepts the durable `smart-prompt` shape. Only a Smart Prompt without text/result, stale-result marker, LLM activation/instruction, attachments, input references, links or group membership updates position or deletes through NodeMutationService; rejected writes do not fall through to raw save. Content-bearing, connected, grouped and configured Prompts remain compatibility. Focused regression: PASS (111 tests); full regression: PASS (272 tests).
 
 2026-09-06 Classic connected blank Prompt/default Loop creation: normal port-menu creation now persists the new node, edge and target input relationship through one GraphMutationService transaction. The page retains only node projection and post-connection compatibility refresh; provider/execution nodes and configured paths remain adapter-owned. Focused API/frontend regression: PASS (16 API tests); full regression: PASS (274 tests).
+```
+
+### 2026-09-06 backend mutation safety boundary and canonical data repair
+
+```text
+2026-09-06 backend blank-shape mutation boundary: the Legacy mutation repository no longer trusts the
+frontend eligibility gate. Inside the same canvas lock that performs the mutation, it now rejects
+content-bearing, grouped, history-linked, input-referenced, and (except the characterized Image edge
+cleanup) connected nodes for both update and delete with `NodeMutationUnsupportedError`
+(`unsupported_node_shape`, HTTP 422), while stale revisions still fail with 409 and supported blank
+shapes keep their existing contracts. New adapter tests cover rich update/delete rejection, group-member
+rejection, dependent-input-reference rejection, connected-Prompt rejection, adapter-level stale
+rejection, and unchanged blank contracts; a route test pins the 422 mapping and the unchanged payload.
+Focused regression: PASS; full regression: PASS (280 tests). Python AST (33 files) and JS syntax checks
+pass. This closes the audited gap where a direct API caller could delete a group-linked, referenced, or
+content-bearing node because the repository gated only on `node.type`.
+
+2026-09-06 canonical data-integrity repair: a legacy-routed (rollback) server session on 2026-09-06
+morning produced a verified split-brain — one orphan Canvas (`b489247e…`, created 07:41 through the
+versioned API with JSONL audit evidence) existed only in Legacy JSON, sixteen active Canvases carried
+list-board position drift, and the SQLite `canvases` table contained a `revision`/`baseline` row leaked
+by an older `tests/test_repository_baseline.py` run before that test gained its routing patch. Repair:
+pre-repair snapshot `data/canvas-source-backups/r4-repair-20260906T091748/` (23 payload files plus the
+purged row's recovered JSON), the stale `7ed83bf5…` rollback file was refreshed from its newer canonical
+payload, the orphan and board-only drifts were converged through the tested migration import path
+(`tools/migrate_project_canvas.py`), and the test-artifact row was purged through
+`purge_canvas_payload` with audit. Post-repair report `data/r4-repair-migration-report.json`: authority
+`sqlite`, 23 imported, 0 skipped, 23 comparisons, 0 differences; SQLite rows 23 == Legacy files 23 with
+zero divergent payloads and the orphan's two nodes present. R4 Gate items
+`source_count == canonical_count` / `skipped == 0` / `differences == 0` are re-established as of this
+repair; the general prohibition on running legacy-routed servers while SQLite authority is active is
+recorded in CURRENT_EXECUTION_STATUS.md.
 ```
 
 ## Browser — new Canvas

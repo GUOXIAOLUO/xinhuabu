@@ -1,0 +1,289 @@
+{
+  "activated": false,
+  "canvas_authority": "sqlite",
+  "comparisons": [
+    {
+      "canvas_id": "0dfb12678d0b446c989707820711d2f9",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "207b8d94d29846cebf53dc56c0919444",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "218861577c5c4c3ea153b2b12cacf3f4",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "2af32886ddcd43beaaa33a0acdfb8f33",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "321bdedb172b461c81fd5fe19e886a8a",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "41b7a46e4bd84d7e9900320066e4336b",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "5698a9e0d5344336adde8a2afb928f28",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "59459dfb82ef41ac8bf1d0b0b6fb2925",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "7846630ca9924834b7282d1aee9fdcc6",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "7dae4d0554d144388c827c12ec50d2f6",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "7ed83bf56f234d77a9e67ae1f6496577",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "891954f256e34c44ac0fc8615f22f295",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "9c8f3ceb50004e59b61c953b029d64c4",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "a4b4170105c0444abf9d2fb988e52452",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "af965411cc2146958f8f16bf9edd63dd",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "b4404b60254547668d52535e66928eb6",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "b489247eabbc411cb8433d6fb39b06bd",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "bf43426d46e648e2b069f4a2313f4aab",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "c29d2daf364a4c7fa5b5632f60e9903d",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "ca914662f0dc4923bd5b60b29eb55b68",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "e3db310252584cba9cc28b9bf84094ce",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "ee27891fd77f4d9bbc5e6647200b8dde",
+      "differences": [],
+      "matches": true
+    },
+    {
+      "canvas_id": "f80bf3c7ba43443a9bda2b834e102601",
+      "differences": [],
+      "matches": true
+    }
+  ],
+  "generated_at": "2026-09-06T01:18:13.066153Z",
+  "identity_resolutions": {
+    "0dfb12678d0b446c989707820711d2f9": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "207b8d94d29846cebf53dc56c0919444": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "218861577c5c4c3ea153b2b12cacf3f4": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "2af32886ddcd43beaaa33a0acdfb8f33": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "321bdedb172b461c81fd5fe19e886a8a": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "41b7a46e4bd84d7e9900320066e4336b": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "5698a9e0d5344336adde8a2afb928f28": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "59459dfb82ef41ac8bf1d0b0b6fb2925": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "7846630ca9924834b7282d1aee9fdcc6": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "7dae4d0554d144388c827c12ec50d2f6": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "7ed83bf56f234d77a9e67ae1f6496577": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "891954f256e34c44ac0fc8615f22f295": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "9c8f3ceb50004e59b61c953b029d64c4": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "a4b4170105c0444abf9d2fb988e52452": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "af965411cc2146958f8f16bf9edd63dd": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "b4404b60254547668d52535e66928eb6": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "b489247eabbc411cb8433d6fb39b06bd": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "bf43426d46e648e2b069f4a2313f4aab": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "c29d2daf364a4c7fa5b5632f60e9903d": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "ca914662f0dc4923bd5b60b29eb55b68": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "e3db310252584cba9cc28b9bf84094ce": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "ee27891fd77f4d9bbc5e6647200b8dde": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    },
+    "f80bf3c7ba43443a9bda2b834e102601": {
+      "issues": [],
+      "owner_actor_id": null,
+      "owner_state": "local_unowned",
+      "project_id": "default"
+    }
+  },
+  "imported_canvas_ids": [
+    "0dfb12678d0b446c989707820711d2f9",
+    "207b8d94d29846cebf53dc56c0919444",
+    "218861577c5c4c3ea153b2b12cacf3f4",
+    "2af32886ddcd43beaaa33a0acdfb8f33",
+    "321bdedb172b461c81fd5fe19e886a8a",
+    "41b7a46e4bd84d7e9900320066e4336b",
+    "5698a9e0d5344336adde8a2afb928f28",
+    "59459dfb82ef41ac8bf1d0b0b6fb2925",
+    "7846630ca9924834b7282d1aee9fdcc6",
+    "7dae4d0554d144388c827c12ec50d2f6",
+    "7ed83bf56f234d77a9e67ae1f6496577",
+    "891954f256e34c44ac0fc8615f22f295",
+    "9c8f3ceb50004e59b61c953b029d64c4",
+    "a4b4170105c0444abf9d2fb988e52452",
+    "af965411cc2146958f8f16bf9edd63dd",
+    "b4404b60254547668d52535e66928eb6",
+    "b489247eabbc411cb8433d6fb39b06bd",
+    "bf43426d46e648e2b069f4a2313f4aab",
+    "c29d2daf364a4c7fa5b5632f60e9903d",
+    "ca914662f0dc4923bd5b60b29eb55b68",
+    "e3db310252584cba9cc28b9bf84094ce",
+    "ee27891fd77f4d9bbc5e6647200b8dde",
+    "f80bf3c7ba43443a9bda2b834e102601"
+  ],
+  "schema_version": "workbench.project-canvas-migration-report/1",
+  "skipped_canvas_ids": []
+}
