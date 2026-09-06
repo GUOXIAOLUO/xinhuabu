@@ -25,7 +25,7 @@ REMOVE       = 可删除/待删除
 | Canvas persistence | adapter client | adapter client | SQLite `CanvasRecord` | UNIFIED | Unified | Keep Legacy JSON only as import/rollback. | status R3/R4 acceptance |
 | revision/CAS | none | none | API/application service | UNIFIED | Unified | Maintain conflict coverage. | `tests/test_canvas_nodes_runtime.py` |
 | remote/version polling | interval/merge policy | interval/merge policy | transport-neutral coordinator only | PARTIAL | Unified | Move polling policy/state into the product runtime. | `canvas-remote-sync.js`; save/merge characterization below |
-| viewport state | page state + runtime mirror; default fit/recovery commits use runtime | page state + runtime mirror; default fit/recovery commits use runtime | `CanvasRuntime` policy/mirror | PARTIAL | Unified | Make one runtime state authoritative. | `canvas.js`, `smart-canvas.js`, `runtime-state.js`; fit/recovery contract |
+| viewport state | page load/swap adopt through one seam; interaction commits and mirror read from runtime | page load/swap adopt through one seam; interaction commits and mirror read from runtime | `CanvasRuntime` viewport authority with adapter adopt/reset seam | PARTIAL | Unified | Migrate remaining pan/zoom/minimap DOM and persistence lifecycle on top of the authoritative state. | `canvas.js`, `smart-canvas.js`, `runtime-state.js`; canvas-state-swap contract |
 | pan | page DOM/save shell; shared viewport pan session on default path | page DOM/save shell; shared viewport pan session on default path | CanvasRuntime command plus shared pan session | PARTIAL | Unified | Migrate remaining DOM/persistence lifecycle. | `runtime-state.js`; pan-session contract |
 | zoom | page preview/minimap shell; shared wheel-scale, centering and default preview-exit commits | page preview/minimap shell; shared wheel-scale, centering and default preview-exit commits | CanvasRuntime command plus shared viewport policy | PARTIAL | Unified | Migrate remaining DOM/minimap/persistence lifecycle. | `runtime-state.js`; viewport interaction contracts |
 | semantic zoom | adapter enablement/iteration; shared DOM application on default path | adapter enablement/iteration; shared DOM application on default path | shared policy plus `WorkbenchSemanticZoomApply` indicator/presentation apply+reset owner | PARTIAL | Unified | Move remaining enablement/call timing with renderer ownership. | `semantic-zoom.js`; `semantic-zoom-apply.js` |
@@ -434,6 +434,23 @@ Not yet run in this task. Existing status records read-only acceptance only.
 
 2026-09-06 Classic connected-creation browser read smoke: local `127.0.0.1:3000` loaded Classic fixture `7ed83bf56f234d77a9e67ae1f6496577` after the command cache update, retaining six ready cards, generic Input/Output ports, media controls, workflow controls, and `100% · 完整 · 6 节点`. The check was read-only: no connection, creation, save, deletion or execution was invoked.
 2026-09-06 isolated read/write smoke on the same `127.0.0.1:3014` temporary server: the historical Smart fixture `ca914662f0dc4923bd5b60b29eb55b68` rendered its Composer, shell-mounted Group and Prompt cards, the retained empty node, and `65% · 摘要 · 2 节点`, with the shared semantic-zoom, drag and resize modules present and `unified_canvas` default-on. A pointer drag of the Prompt card at 65% zoom moved it by a world delta of +61.84/+46.38 — exactly the +40/+30 screen path divided by the live scale through the shared drag session — and the isolated database recorded the new position. No console errors surfaced; the temporary server was stopped and removed after the check.
+2026-09-06 unified-runtime lifecycle authority: canvas state swaps now reset the unified runtime through
+one seam per adapter — Classic `adoptCanvasRuntimeState` (openCanvas, create-canvas, remote
+replace-apply, return-to-manager, delete-current) and Smart `adoptSmartRuntimeState` (loadCanvas). The
+seam adopts the new viewport and drops the runtime so the next dispatch reseeds it from the new
+canvas's viewport, geometry and selection; this removes the latent stale-base bug where an in-place
+canvas switch left the previous runtime holding viewport/geometry/selection while wheel `VIEWPORT_ZOOM_AT`
+computed against it. The save-path same-value viewport reassignment stays page-local; `unified_canvas=0`
+behavior is unchanged. Source assertions pin the seam and all swap sites. Focused regression: PASS (104
+tests); full regression: PASS (290 tests).
+
+2026-09-06 isolated reseed browser smoke `127.0.0.1:3015` (process-local copy of the local SQLite
+database): on the Classic editor, canvas B was zoomed to 1.08 through a real wheel event, then an
+in-place `openCanvas` switch back to canvas A was verified to null the runtime, restore A's stored
+viewport ({0,0,1}, not B's zoomed one), re-seed the runtime from A's state, and compute a subsequent
+zoom-at exactly from the fresh base (anchor 300/200 → viewport {-24,-16} at scale 1.08). The Smart page
+verified the same adopt→null→reseed cycle against its 65% camera. No console errors surfaced; the
+temporary server and database copy were stopped and removed after the check.
 ```
 
 ## Persistence / restart
