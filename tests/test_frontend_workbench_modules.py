@@ -814,6 +814,92 @@ console.log(JSON.stringify({{
         self.assertEqual(smart.count("WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, Date.now())"), 4)
         self.assertEqual(smart.count("WorkbenchCanvasPersistence.adoptRevision(canvas, result.canvas_revision, 0)"), 4)
 
+    def test_editor_saves_share_one_scheduler(self):
+        scheduler = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-save-scheduler.js"
+        script = f"""
+const fs = require('fs');
+const vm = require('vm');
+const timers = [];
+const sandbox = {{
+  window: {{}},
+  setTimeout: (callback, delay) => {{ timers.push({{callback, delay, cleared: false}}); return timers.length; }},
+  clearTimeout: handle => {{ if (timers[handle - 1]) timers[handle - 1].cleared = true; }},
+}};
+vm.runInNewContext(fs.readFileSync({json.dumps(str(scheduler))}, 'utf8'), sandbox);
+const S = sandbox.window.WorkbenchCanvasSaveScheduler;
+const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+(async () => {{
+  const runsA = [];
+  const schedA = S.create({{debounceMs: 500, run: async () => {{ runsA.push(1); }}}});
+  schedA.schedule();
+  const pending = timers[timers.length - 1];
+  const debouncedOnly = pending.delay === 500 && !pending.cleared && runsA.length === 0;
+  pending.callback();
+  await tick();
+  const firedAfterDebounce = runsA.length === 1;
+
+  const runsB = [];
+  const retries = [];
+  let releaseB;
+  const gateB = new Promise(resolve => {{ releaseB = resolve; }});
+  const schedB = S.create({{debounceMs: 100, run: async () => {{ runsB.push(1); await gateB; }}, onRetry: () => retries.push(1)}});
+  const first = schedB.flush();
+  await tick();
+  const second = await schedB.flush();
+  schedB.schedule();
+  const coalesced = {{second, noTimer: !schedB.hasScheduled(), again: schedB.hasPendingAgain()}};
+  releaseB();
+  const firstDone = await first;
+  const retryTimer = timers[timers.length - 1];
+  const retryScheduled = retries.length === 1 && retryTimer.delay === 0 && !retryTimer.cleared;
+  retryTimer.callback();
+  await tick();
+  const retried = runsB.length === 2;
+
+  const runsC = [];
+  let releaseC;
+  const gateC = new Promise(resolve => {{ releaseC = resolve; }});
+  const schedC = S.create({{debounceMs: 100, allowOverlap: true, run: async () => {{ runsC.push(1); await gateC; }}}});
+  const overlap1 = schedC.flush();
+  await tick();
+  const overlap2 = schedC.flush();
+  releaseC();
+  const overlapDone = (await Promise.all([overlap1, overlap2])) && runsC.length === 2;
+
+  const runsD = [];
+  const schedD = S.create({{debounceMs: 50, run: async () => {{ runsD.push(1); }}}});
+  schedD.schedule();
+  schedD.cancel();
+  const canceled = !schedD.hasScheduled();
+  await tick();
+  console.log(JSON.stringify({{debouncedOnly, firedAfterDebounce, coalesced, firstDone, retryScheduled, retried, overlapDone, canceled, runsD: runsD.length}}));
+}})();
+"""
+        result = subprocess.run(["node", "-e", script], check=True, text=True, capture_output=True)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["debouncedOnly"])
+        self.assertTrue(payload["firedAfterDebounce"])
+        self.assertEqual(payload["coalesced"], {"second": False, "noTimer": True, "again": True})
+        self.assertTrue(payload["firstDone"])
+        self.assertTrue(payload["retryScheduled"])
+        self.assertTrue(payload["retried"])
+        self.assertTrue(payload["overlapDone"])
+        self.assertTrue(payload["canceled"])
+        self.assertEqual(payload["runsD"], 0)
+
+        for page, editor in (("canvas.html", "canvas.js"), ("smart-canvas.html", "smart-canvas.js")):
+            text = (ROOT / "static" / page).read_text(encoding="utf-8")
+            self.assertLess(text.index("workbench/canvas/canvas-save-scheduler.js"), text.index(editor))
+        classic = (ROOT / "static" / "js" / "canvas.js").read_text(encoding="utf-8")
+        smart = (ROOT / "static" / "js" / "smart-canvas.js").read_text(encoding="utf-8")
+        for legacy_state in ("savingCanvasNow", "saveCanvasAgain", "saveTimer"):
+            self.assertNotIn(legacy_state, classic)
+        self.assertIn("WorkbenchCanvasSaveScheduler.create", classic)
+        for legacy_state in ("canvasSyncInFlight", "saveTimer"):
+            self.assertNotIn(legacy_state, smart)
+        self.assertIn("WorkbenchCanvasSaveScheduler.create", smart)
+        self.assertIn("allowOverlap: true", smart)
+
     def test_remote_sync_polls_canvas_metadata_through_adapter_callbacks(self):
         remote_sync = ROOT / "static" / "js" / "workbench" / "canvas" / "canvas-remote-sync.js"
         script = f"""

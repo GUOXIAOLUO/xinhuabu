@@ -410,7 +410,6 @@ function applyCanvasRuntimeNodeResize(node){
     catch(error) { syncCanvasRuntimeGeometry(runtime); runtime.dispatch(command); }
     return true;
 }
-let saveTimer = null;
 let creatingCanvas = false;
 let createCanvasKind = 'classic';
 let trashMode = false;
@@ -426,11 +425,14 @@ backToManagerBtn?.addEventListener('click', () => {
     window.location.href = canvasListUrlForProject(canvas?.project || requestedCanvasListProject() || rememberedCanvasListProject());
 });
 let localCanvasDirty = false;
-let savingCanvasNow = false;
-let saveCanvasAgain = false;
 let applyingRemoteCanvas = false;
 let remoteSyncTimer = null;
 let canvasRemoteSync = null;
+const saveScheduler = window.WorkbenchCanvasSaveScheduler.create({
+    debounceMs: 500,
+    run: () => saveCanvasNow(),
+    onRetry: () => { localCanvasDirty = true; },
+});
 let lastCanvasUpdatedAt = 0;
 let models = {gpt:'gpt-image-2', nano:'nano-banana-pro'};
 let imageModels = ['gpt-image-2', 'nano-banana-pro'];
@@ -1462,12 +1464,7 @@ function scheduleSave(){
     if(!canvas || applyingRemoteCanvas) return;
     localCanvasDirty = true;
     setStatus('Saving...');
-    clearTimeout(saveTimer);
-    if(savingCanvasNow){
-        saveCanvasAgain = true;
-        return;
-    }
-    saveTimer = setTimeout(saveCanvas, 500);
+    saveScheduler.schedule();
 }
 function scheduleViewportSave(){
     saveLocalViewport();
@@ -1511,14 +1508,11 @@ function serializableCanvasNodes(list=nodes){
     return (list || []).map(serializableCanvasNode);
 }
 async function saveCanvas(){
+    return saveScheduler.flush();
+}
+async function saveCanvasNow(){
     if(!canvas || applyingRemoteCanvas) return;
-    if(savingCanvasNow){
-        saveCanvasAgain = true;
-        return;
-    }
     sanitizeConnections();
-    savingCanvasNow = true;
-    saveCanvasAgain = false;
     try {
         const result = await window.WorkbenchCanvasPersistence.save(canvas.id, {
             title:canvas.title,
@@ -1532,9 +1526,9 @@ async function saveCanvas(){
         });
         if(result.status === 409){
             const remote = result.canvas;
-            if(localCanvasDirty || saveCanvasAgain){
+            if(localCanvasDirty || saveScheduler.hasPendingAgain()){
                 lastCanvasUpdatedAt = Number(result.updatedAt || remote?.updated_at || lastCanvasUpdatedAt || 0);
-                saveCanvasAgain = true;
+                saveScheduler.markAgain();
                 setStatus('Saving...');
                 return;
             }
@@ -1549,20 +1543,13 @@ async function saveCanvas(){
         viewport = localViewport;
         canvas.updated_at = Number(canvas.updated_at || Date.now());
         lastCanvasUpdatedAt = canvas.updated_at;
-        localCanvasDirty = Boolean(saveCanvasAgain);
+        localCanvasDirty = Boolean(saveScheduler.hasPendingAgain());
         if(currentCanvasTime) currentCanvasTime.textContent = formatCanvasTime(canvas.updated_at);
         setStatus('Saved');
         loadCanvasList(false);
     } catch(e) {
         setStatus('Save failed');
         console.error(e);
-    } finally {
-        savingCanvasNow = false;
-        if(saveCanvasAgain && canvas && !applyingRemoteCanvas){
-            saveCanvasAgain = false;
-            localCanvasDirty = true;
-            setTimeout(saveCanvas, 0);
-        }
     }
 }
 
@@ -2143,7 +2130,7 @@ async function openCanvas(id){
 }
 function applyRemoteCanvasData(remote){
     if(!remote || !canvas || remote.id !== canvas.id) return;
-    if(localCanvasDirty || saveTimer || savingCanvasNow || saveCanvasAgain){
+    if(localCanvasDirty || saveScheduler.hasScheduled() || saveScheduler.isInFlight() || saveScheduler.hasPendingAgain()){
         clearTimeout(remoteSyncTimer);
         remoteSyncTimer = setTimeout(syncRemoteCanvasNow, 1000);
         return;
@@ -2266,15 +2253,14 @@ function handleCanvasUpdatedMessage(data){
         canvasId:canvas?.id, clientId:CLIENT_ID, currentUpdatedAt:lastCanvasUpdatedAt,
     });
     if(!update) return;
-    clearTimeout(saveTimer);
-    saveTimer = null;
+    saveScheduler.cancel();
     localCanvasDirty = false;
     clearTimeout(remoteSyncTimer);
-    remoteSyncTimer = setTimeout(syncRemoteCanvasNow, savingCanvasNow ? 700 : 120);
+    remoteSyncTimer = setTimeout(syncRemoteCanvasNow, saveScheduler.isInFlight() ? 700 : 120);
     setStatus('Syncing...');
 }
 async function returnToCanvasManager(){
-    clearTimeout(saveTimer);
+    saveScheduler.cancel();
     if(canvas && localCanvasDirty) await saveCanvas();
     stopCanvasRemotePolling();
     canvas = null;

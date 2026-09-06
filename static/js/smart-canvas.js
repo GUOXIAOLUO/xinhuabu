@@ -157,7 +157,6 @@ let panState = null;
 let didPan = false;
 let portDragState = null;
 let connectionEraseState = null;
-let saveTimer = null;
 let apiProviders = [];
 let comfyWorkflows = [];
 let comfyInstanceCount = 1;
@@ -5878,7 +5877,6 @@ function handleAssetLibraryUpdatedMessage(data={}){
 // 多人协作同步：一个稳定的客户端 id，既用于 WS 连接，也随 saveCanvas 上报，
 // 服务器广播 canvas_updated 时带回 client_id，自己发的就忽略，避免自我刷新。
 const smartClientId = `canvas_smart_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
-let canvasSyncInFlight = false;
 let canvasSyncTimer = null;
 let smartRemoteSync = null;
 let connectionLayerRaf = 0;
@@ -6134,7 +6132,7 @@ function handleCanvasUpdatedMessage(data={}){
         canvasId, clientId:smartClientId, currentUpdatedAt:canvas?.updated_at,
     });
     if(!update) return;
-    if(canvasSyncInFlight) return; // 我正在保存，保存完成/409 合并会处理
+    if(saveScheduler.isInFlight()) return; // 我正在保存，保存完成/409 合并会处理
     scheduleCanvasMergeReload(200);
 }
 function startCanvasMetaPoll(){
@@ -6143,7 +6141,7 @@ function startCanvasMetaPoll(){
         smartRemoteSync = window.WorkbenchCanvasRemoteSync.create({
             canvasId:() => canvasId,
             currentUpdatedAt:() => canvas?.updated_at,
-            isEligible:() => Boolean(canvas && !canvasSyncInFlight && !dragState && !selectionState),
+            isEligible:() => Boolean(canvas && !saveScheduler.isInFlight() && !dragState && !selectionState),
             onNewer:() => mergeReloadCanvasNow(),
             intervalMs:8000,
         });
@@ -6718,10 +6716,17 @@ async function loadCanvas(){
     } catch(e) { toast(tr('smart.toastCanvasFail')); }
 }
 function scheduleSave(){
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveCanvas, 450);
+    saveScheduler.schedule();
 }
 async function saveCanvas(){
+    return saveScheduler.flush();
+}
+const saveScheduler = window.WorkbenchCanvasSaveScheduler.create({
+    debounceMs: 450,
+    allowOverlap: true,
+    run: () => saveCanvasNow(),
+});
+async function saveCanvasNow(){
     if(!canvasId || !canvas) return;
     savePromptDraftForCurrent();
     nodes.forEach(node => {
@@ -6732,7 +6737,6 @@ async function saveCanvas(){
     canvas.settings = settingsForStorage(canvasDefaultSmartSettings || initialSmartSettings);
     canvas.viewport = {...viewport};
     const storageCanvas = canvasForStorage();
-    canvasSyncInFlight = true;
     try {
         const result = await window.WorkbenchCanvasPersistence.save(canvasId, {
             title:storageCanvas.title || tr('smart.title'),
@@ -6763,12 +6767,9 @@ async function saveCanvas(){
             } else if(result.updatedAt) {
                 canvas.updated_at = result.updatedAt;
             }
-            clearTimeout(saveTimer);
-            saveTimer = setTimeout(saveCanvas, 300);
+            saveScheduler.schedule(300);
         }
-    } catch(e) {} finally {
-        canvasSyncInFlight = false;
-    }
+    } catch(e) {}
 }
 function imageMetaFromNode(node){
     return {};
